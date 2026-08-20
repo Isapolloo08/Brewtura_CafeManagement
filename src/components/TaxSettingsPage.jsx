@@ -21,29 +21,41 @@ const AUDIT_LOG = [
 ];
 
 export function TaxSettingsPage({ settings, onUpdateSettings }) {
+  const pct = (v) => Math.round((parseFloat(v) || 0) * 100 * 10) / 10;
+  const vatPct = pct(settings?.vatRate);
+  const servicePct = pct(settings?.serviceCharge);
+  const inclusive = String(settings?.taxInclusive).toLowerCase() === 'true';
+
   const [form, setForm] = useState({
-    vatRate: settings?.vatRate ?? 0,
-    serviceCharge: settings?.serviceCharge ?? 0,
-    taxInclusive: settings?.taxInclusive ?? false,
+    vatRate: vatPct,
+    serviceCharge: servicePct,
+    taxInclusive: inclusive,
   });
   const [msg, setMsg] = useState({ text: '', type: '' });
 
-  const hasChanges = Object.keys(form).some(
-    (k) => form[k] !== settings?.[k]
-  );
+  const hasChanges =
+    form.vatRate !== vatPct ||
+    form.serviceCharge !== servicePct ||
+    form.taxInclusive !== inclusive;
 
   const handleSave = (e) => {
     e.preventDefault();
-    onUpdateSettings({ ...settings, ...form });
+    onUpdateSettings({
+      ...settings,
+      ...form,
+      vatRate: (parseFloat(form.vatRate) || 0) / 100,
+      serviceCharge: (parseFloat(form.serviceCharge) || 0) / 100,
+      taxInclusive: String(!!form.taxInclusive),
+    });
     setMsg({ text: 'Tax settings saved successfully!', type: 'success' });
     setTimeout(() => setMsg({ text: '', type: '' }), 4000);
   };
 
   const handleReset = () => {
     setForm({
-      vatRate: settings?.vatRate ?? 0,
-      serviceCharge: settings?.serviceCharge ?? 0,
-      taxInclusive: settings?.taxInclusive ?? false,
+      vatRate: vatPct,
+      serviceCharge: servicePct,
+      taxInclusive: inclusive,
     });
   };
 

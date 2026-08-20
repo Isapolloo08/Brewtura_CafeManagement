@@ -77,45 +77,26 @@ export const getProducts = async (req, res) => {
     const products = productsRes.rows;
 
     for (let product of products) {
-      // Get Customizations
+      // Get Customizations (sizes/options + temperature/milk/addon selections)
       const customizationsRes = await query(
         'SELECT * FROM product_customizations WHERE product_id = $1 AND is_active = true ORDER BY price_delta ASC',
         [product.id]
       );
-      product.customizations = customizationsRes.rows;
-
-      // Get Addons
-      const addonsRes = await query(
-        `SELECT a.* FROM addons a
-         JOIN product_addons pa ON a.id = pa.addon_id
-         WHERE pa.product_id = $1 AND a.is_active = true`,
-        [product.id]
-      );
-      product.addons = addonsRes.rows;
-
-      // Get Temperatures
-      const tempsRes = await query(
-        `SELECT t.* FROM temperature_options t
-         JOIN product_temperatures pt ON t.id = pt.temperature_id
-         WHERE pt.product_id = $1 AND t.is_active = true
-         ORDER BY t.id ASC`,
-        [product.id]
-      );
-      product.temperatures = tempsRes.rows;
-
-      // Get Milks
-      const milksRes = await query(
-        `SELECT m.* FROM milk_options m
-         JOIN product_milks pm ON m.id = pm.milk_id
-         WHERE pm.product_id = $1 AND m.is_active = true
-         ORDER BY m.id ASC`,
-        [product.id]
-      );
-      product.milks = milksRes.rows;
+      const customizationRows = customizationsRes.rows;
+      product.customizations = customizationRows.filter(c => !['temperature', 'milk', 'addon'].includes(c.customization_type));
+      product.temperatures = customizationRows
+        .filter(c => c.customization_type === 'temperature')
+        .map(c => ({ id: c.id, name: c.name, price_delta: parseFloat(c.price_delta) }));
+      product.milks = customizationRows
+        .filter(c => c.customization_type === 'milk')
+        .map(c => ({ id: c.id, name: c.name, price_delta: parseFloat(c.price_delta) }));
+      product.addons = customizationRows
+        .filter(c => c.customization_type === 'addon')
+        .map(c => ({ id: c.id, name: c.name, price: parseFloat(c.price_delta) }));
 
       // Get Recipe BOM items
       const recipeRes = await query(
-        `SELECT r.id AS recipe_id, r.ingredient_id, r.qty_required, i.name AS ingredient_name, i.unit
+        `SELECT r.id AS recipe_id, r.ingredient_id, r.product_customization_id, r.qty_required, i.name AS ingredient_name, i.unit
          FROM recipes r
          JOIN ingredients i ON i.id = r.ingredient_id
          WHERE r.product_id = $1
@@ -133,7 +114,7 @@ export const getProducts = async (req, res) => {
 };
 
 export const createProduct = async (req, res) => {
-  const { category_id, name, description, base_price, image_url, sort_order, addons, temperature_ids, milk_ids, customizations } = req.body;
+  const { category_id, name, description, base_price, image_url, sort_order, customizations } = req.body;
 
   try {
     let finalSortOrder = sort_order;
@@ -152,12 +133,6 @@ export const createProduct = async (req, res) => {
 
     await query('UPDATE categories SET sort_order = sort_order + 1 WHERE id = $1', [category_id]);
 
-    if (Array.isArray(addons)) {
-      for (let addonId of addons) {
-        await query('INSERT INTO product_addons (product_id, addon_id) VALUES ($1, $2)', [product.id, addonId]);
-      }
-    }
-
     if (Array.isArray(customizations)) {
       for (let c of customizations) {
         if (!c.name || !c.name.trim()) continue;
@@ -165,18 +140,6 @@ export const createProduct = async (req, res) => {
           'INSERT INTO product_customizations (product_id, name, customization_type, price_delta, is_default) VALUES ($1, $2, $3, $4, $5)',
           [product.id, c.name.trim(), c.customization_type || 'option', c.price_delta || 0, c.is_default || false]
         );
-      }
-    }
-
-    if (Array.isArray(temperature_ids)) {
-      for (let tid of temperature_ids) {
-        await query('INSERT INTO product_temperatures (product_id, temperature_id) VALUES ($1, $2)', [product.id, tid]);
-      }
-    }
-
-    if (Array.isArray(milk_ids)) {
-      for (let mid of milk_ids) {
-        await query('INSERT INTO product_milks (product_id, milk_id) VALUES ($1, $2)', [product.id, mid]);
       }
     }
 
@@ -200,7 +163,7 @@ export const deleteProduct = async (req, res) => {
 
 export const updateProduct = async (req, res) => {
   const { id } = req.params;
-  const { category_id, name, description, base_price, image_url, is_active, sort_order, addons, temperature_ids, milk_ids, customizations } = req.body;
+  const { category_id, name, description, base_price, image_url, is_active, sort_order, customizations } = req.body;
 
   try {
     const result = await query(
@@ -217,13 +180,6 @@ export const updateProduct = async (req, res) => {
       [category_id, name, description, base_price, image_url, is_active, sort_order, id]
     );
 
-    if (addons && Array.isArray(addons)) {
-      await query('DELETE FROM product_addons WHERE product_id = $1', [id]);
-      for (let addonId of addons) {
-        await query('INSERT INTO product_addons (product_id, addon_id) VALUES ($1, $2)', [id, addonId]);
-      }
-    }
-
     if (Array.isArray(customizations)) {
       await query('DELETE FROM product_customizations WHERE product_id = $1', [id]);
       for (let c of customizations) {
@@ -232,24 +188,6 @@ export const updateProduct = async (req, res) => {
           'INSERT INTO product_customizations (product_id, name, customization_type, price_delta, is_default) VALUES ($1, $2, $3, $4, $5)',
           [id, c.name.trim(), c.customization_type || 'option', c.price_delta || 0, c.is_default || false]
         );
-      }
-    }
-
-    if (temperature_ids !== undefined) {
-      await query('DELETE FROM product_temperatures WHERE product_id = $1', [id]);
-      if (Array.isArray(temperature_ids)) {
-        for (let tid of temperature_ids) {
-          await query('INSERT INTO product_temperatures (product_id, temperature_id) VALUES ($1, $2)', [id, tid]);
-        }
-      }
-    }
-
-    if (milk_ids !== undefined) {
-      await query('DELETE FROM product_milks WHERE product_id = $1', [id]);
-      if (Array.isArray(milk_ids)) {
-        for (let mid of milk_ids) {
-          await query('INSERT INTO product_milks (product_id, milk_id) VALUES ($1, $2)', [id, mid]);
-        }
       }
     }
 
@@ -274,12 +212,12 @@ export const getCustomizationTemplates = async (req, res) => {
 };
 
 export const createCustomizationTemplate = async (req, res) => {
-  const { name, customization_type, default_price_delta } = req.body;
+  const { name, customization_type, default_price_delta, stock } = req.body;
   try {
     const result = await query(
-      `INSERT INTO customization_templates (name, customization_type, default_price_delta)
-       VALUES ($1, $2, $3) RETURNING *`,
-      [name, customization_type || 'option', default_price_delta || 0]
+      `INSERT INTO customization_templates (name, customization_type, default_price_delta, stock)
+       VALUES ($1, $2, $3, $4) RETURNING *`,
+      [name, customization_type || 'option', default_price_delta || 0, stock !== undefined ? Number(stock) : 0]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -290,16 +228,17 @@ export const createCustomizationTemplate = async (req, res) => {
 
 export const updateCustomizationTemplate = async (req, res) => {
   const { id } = req.params;
-  const { name, customization_type, default_price_delta, is_active } = req.body;
+  const { name, customization_type, default_price_delta, stock, is_active } = req.body;
   try {
     const result = await query(
       `UPDATE customization_templates
        SET name = COALESCE($1, name),
            customization_type = COALESCE($2, customization_type),
            default_price_delta = COALESCE($3, default_price_delta),
-           is_active = COALESCE($4, is_active)
-       WHERE id = $5 RETURNING *`,
-      [name, customization_type, default_price_delta, is_active, id]
+           stock = COALESCE($4, stock),
+           is_active = COALESCE($5, is_active)
+       WHERE id = $6 RETURNING *`,
+      [name, customization_type, default_price_delta, stock !== undefined ? Number(stock) : null, is_active, id]
     );
     res.json(result.rows[0]);
   } catch (err) {
@@ -353,10 +292,15 @@ export const getCustomizationRecipes = async (req, res) => {
   }
 };
 
-// --- ADDONS ---
+// --- ADDONS (stored in customization_templates as type 'addon') ---
 export const getAddons = async (req, res) => {
   try {
-    const result = await query('SELECT * FROM addons WHERE is_active = true ORDER BY name ASC');
+    const result = await query(
+      `SELECT id, name, default_price_delta AS price, stock
+       FROM customization_templates
+       WHERE customization_type = 'addon' AND is_active = true
+       ORDER BY name ASC`
+    );
     res.json(result.rows);
   } catch (err) {
     console.error('getAddons error:', err);
@@ -365,11 +309,18 @@ export const getAddons = async (req, res) => {
 };
 
 export const createAddon = async (req, res) => {
-  const { name, price } = req.body;
+  const { name, price, stock } = req.body;
   try {
     const result = await query(
-      'INSERT INTO addons (name, price) VALUES ($1, $2) RETURNING *',
-      [name, price || 0]
+      `INSERT INTO customization_templates (name, customization_type, default_price_delta, stock)
+       VALUES ($1, 'addon', $2, $3)
+       ON CONFLICT (name) DO UPDATE
+         SET customization_type = EXCLUDED.customization_type,
+             default_price_delta = EXCLUDED.default_price_delta,
+             stock = EXCLUDED.stock,
+             is_active = true
+       RETURNING id, name, default_price_delta AS price, stock`,
+      [name, price || 0, stock !== undefined ? Number(stock) : 0]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -380,15 +331,17 @@ export const createAddon = async (req, res) => {
 
 export const updateAddon = async (req, res) => {
   const { id } = req.params;
-  const { name, price, is_active } = req.body;
+  const { name, price, stock, is_active } = req.body;
   try {
     const result = await query(
-      `UPDATE addons
+      `UPDATE customization_templates
        SET name = COALESCE($1, name),
-           price = COALESCE($2, price),
-           is_active = COALESCE($3, is_active)
-       WHERE id = $4 RETURNING *`,
-      [name, price, is_active, id]
+           default_price_delta = COALESCE($2, default_price_delta),
+           stock = COALESCE($3, stock),
+           is_active = COALESCE($4, is_active)
+       WHERE id = $5 AND customization_type = 'addon'
+       RETURNING id, name, default_price_delta AS price, stock`,
+      [name, price, stock !== undefined ? Number(stock) : null, is_active, id]
     );
     res.json(result.rows[0]);
   } catch (err) {
@@ -400,7 +353,11 @@ export const updateAddon = async (req, res) => {
 export const deleteAddon = async (req, res) => {
   const { id } = req.params;
   try {
-    await query('UPDATE addons SET is_active = false WHERE id = $1', [id]);
+    await query(
+      `UPDATE customization_templates SET is_active = false
+       WHERE id = $1 AND customization_type = 'addon'`,
+      [id]
+    );
     res.json({ message: 'Add-on deactivated successfully' });
   } catch (err) {
     console.error('deleteAddon error:', err);
@@ -408,10 +365,15 @@ export const deleteAddon = async (req, res) => {
   }
 };
 
-// --- TEMPERATURE OPTIONS ---
+// --- TEMPERATURE OPTIONS (stored in customization_templates as type 'temperature') ---
 export const getTemperatureOptions = async (req, res) => {
   try {
-    const result = await query('SELECT * FROM temperature_options WHERE is_active = true ORDER BY id ASC');
+    const result = await query(
+      `SELECT id, name, default_price_delta AS price_delta, stock
+       FROM customization_templates
+       WHERE customization_type = 'temperature' AND is_active = true
+       ORDER BY id ASC`
+    );
     res.json(result.rows);
   } catch (err) {
     console.error('getTemperatureOptions error:', err);
@@ -420,11 +382,18 @@ export const getTemperatureOptions = async (req, res) => {
 };
 
 export const createTemperatureOption = async (req, res) => {
-  const { name, price_delta } = req.body;
+  const { name, price_delta, stock } = req.body;
   try {
     const result = await query(
-      'INSERT INTO temperature_options (name, price_delta) VALUES ($1, $2) RETURNING *',
-      [name, price_delta || 0]
+      `INSERT INTO customization_templates (name, customization_type, default_price_delta, stock)
+       VALUES ($1, 'temperature', $2, $3)
+       ON CONFLICT (name) DO UPDATE
+         SET customization_type = EXCLUDED.customization_type,
+             default_price_delta = EXCLUDED.default_price_delta,
+             stock = EXCLUDED.stock,
+             is_active = true
+       RETURNING id, name, default_price_delta AS price_delta, stock`,
+      [name, price_delta || 0, stock !== undefined ? Number(stock) : 0]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -435,15 +404,17 @@ export const createTemperatureOption = async (req, res) => {
 
 export const updateTemperatureOption = async (req, res) => {
   const { id } = req.params;
-  const { name, price_delta, is_active } = req.body;
+  const { name, price_delta, stock, is_active } = req.body;
   try {
     const result = await query(
-      `UPDATE temperature_options
+      `UPDATE customization_templates
        SET name = COALESCE($1, name),
-           price_delta = COALESCE($2, price_delta),
-           is_active = COALESCE($3, is_active)
-       WHERE id = $4 RETURNING *`,
-      [name, price_delta, is_active, id]
+           default_price_delta = COALESCE($2, default_price_delta),
+           stock = COALESCE($3, stock),
+           is_active = COALESCE($4, is_active)
+       WHERE id = $5 AND customization_type = 'temperature'
+       RETURNING id, name, default_price_delta AS price_delta, stock`,
+      [name, price_delta, stock !== undefined ? Number(stock) : null, is_active, id]
     );
     res.json(result.rows[0]);
   } catch (err) {
@@ -455,7 +426,11 @@ export const updateTemperatureOption = async (req, res) => {
 export const deleteTemperatureOption = async (req, res) => {
   const { id } = req.params;
   try {
-    await query('UPDATE temperature_options SET is_active = false WHERE id = $1', [id]);
+    await query(
+      `UPDATE customization_templates SET is_active = false
+       WHERE id = $1 AND customization_type = 'temperature'`,
+      [id]
+    );
     res.json({ message: 'Temperature option deactivated successfully' });
   } catch (err) {
     console.error('deleteTemperatureOption error:', err);
@@ -463,10 +438,15 @@ export const deleteTemperatureOption = async (req, res) => {
   }
 };
 
-// --- MILK OPTIONS ---
+// --- MILK OPTIONS (stored in customization_templates as type 'milk') ---
 export const getMilkOptions = async (req, res) => {
   try {
-    const result = await query('SELECT * FROM milk_options WHERE is_active = true ORDER BY id ASC');
+    const result = await query(
+      `SELECT id, name, default_price_delta AS price_delta, stock
+       FROM customization_templates
+       WHERE customization_type = 'milk' AND is_active = true
+       ORDER BY id ASC`
+    );
     res.json(result.rows);
   } catch (err) {
     console.error('getMilkOptions error:', err);
@@ -475,11 +455,18 @@ export const getMilkOptions = async (req, res) => {
 };
 
 export const createMilkOption = async (req, res) => {
-  const { name, price_delta } = req.body;
+  const { name, price_delta, stock } = req.body;
   try {
     const result = await query(
-      'INSERT INTO milk_options (name, price_delta) VALUES ($1, $2) RETURNING *',
-      [name, price_delta || 0]
+      `INSERT INTO customization_templates (name, customization_type, default_price_delta, stock)
+       VALUES ($1, 'milk', $2, $3)
+       ON CONFLICT (name) DO UPDATE
+         SET customization_type = EXCLUDED.customization_type,
+             default_price_delta = EXCLUDED.default_price_delta,
+             stock = EXCLUDED.stock,
+             is_active = true
+       RETURNING id, name, default_price_delta AS price_delta, stock`,
+      [name, price_delta || 0, stock !== undefined ? Number(stock) : 0]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -490,15 +477,17 @@ export const createMilkOption = async (req, res) => {
 
 export const updateMilkOption = async (req, res) => {
   const { id } = req.params;
-  const { name, price_delta, is_active } = req.body;
+  const { name, price_delta, stock, is_active } = req.body;
   try {
     const result = await query(
-      `UPDATE milk_options
+      `UPDATE customization_templates
        SET name = COALESCE($1, name),
-           price_delta = COALESCE($2, price_delta),
-           is_active = COALESCE($3, is_active)
-       WHERE id = $4 RETURNING *`,
-      [name, price_delta, is_active, id]
+           default_price_delta = COALESCE($2, default_price_delta),
+           stock = COALESCE($3, stock),
+           is_active = COALESCE($4, is_active)
+       WHERE id = $5 AND customization_type = 'milk'
+       RETURNING id, name, default_price_delta AS price_delta, stock`,
+      [name, price_delta, stock !== undefined ? Number(stock) : null, is_active, id]
     );
     res.json(result.rows[0]);
   } catch (err) {
@@ -510,7 +499,11 @@ export const updateMilkOption = async (req, res) => {
 export const deleteMilkOption = async (req, res) => {
   const { id } = req.params;
   try {
-    await query('UPDATE milk_options SET is_active = false WHERE id = $1', [id]);
+    await query(
+      `UPDATE customization_templates SET is_active = false
+       WHERE id = $1 AND customization_type = 'milk'`,
+      [id]
+    );
     res.json({ message: 'Milk option deactivated successfully' });
   } catch (err) {
     console.error('deleteMilkOption error:', err);

@@ -72,7 +72,11 @@ export const createOrder = async (req, res) => {
 
       if (item.addons && Array.isArray(item.addons)) {
         for (let addonId of item.addons) {
-          const addonRes = await client.query('SELECT price FROM addons WHERE id = $1', [addonId]);
+          const addonRes = await client.query(
+            `SELECT default_price_delta AS price FROM customization_templates
+             WHERE id = $1 AND customization_type = 'addon'`,
+            [addonId]
+          );
           if (addonRes.rows.length > 0) {
             const addonPrice = parseFloat(addonRes.rows[0].price);
             lineTotal += addonPrice * item.quantity;
@@ -89,15 +93,47 @@ export const createOrder = async (req, res) => {
       });
     }
 
-    const tax_rate = 0.12; // 12% tax rate
-    const tax_total = Math.round(subtotal * tax_rate * 100) / 100;
-    const total = subtotal + tax_total;
+    // 2b. Read tax & service charge configuration from global settings
+    const settingsRes = await client.query(
+      `SELECT key, value FROM settings
+       WHERE key IN ('tax_rate', 'service_charge', 'tax_inclusive')`
+    );
+    const settingsMap = {};
+    for (const row of settingsRes.rows) settingsMap[row.key] = row.value;
+
+    const taxRate = parseFloat(settingsMap.tax_rate) || 0;
+    const serviceCharge = parseFloat(settingsMap.service_charge) || 0;
+    const taxInclusive = ['true', '1', 'yes'].includes(
+      String(settingsMap.tax_inclusive).toLowerCase()
+    );
+
+    let service_charge_total = 0;
+    let tax_total = 0;
+    let total = subtotal;
+
+    // Service charge is a percentage of the subtotal, added on top.
+    if (serviceCharge > 0) {
+      service_charge_total = Math.round(subtotal * serviceCharge * 100) / 100;
+      total += service_charge_total;
+    }
+
+    // VAT — if prices are tax-inclusive the VAT is already inside the menu
+    // price (only the embedded portion is reported); otherwise it is added
+    // on top at checkout.
+    if (taxRate > 0) {
+      if (taxInclusive) {
+        tax_total = Math.round(subtotal * (taxRate / (1 + taxRate)) * 100) / 100;
+      } else {
+        tax_total = Math.round(subtotal * taxRate * 100) / 100;
+        total += tax_total;
+      }
+    }
 
     // 3. Create Order Record
     const orderRes = await client.query(
       `INSERT INTO orders
-        (branch_id, order_number, order_type, table_number, customer_id, placed_by_user_id, status, subtotal, tax_total, total, notes)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        (branch_id, order_number, order_type, table_number, customer_id, placed_by_user_id, status, subtotal, service_charge_total, tax_total, total, notes)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
        RETURNING *`,
       [
         branch_id || (req.user ? req.user.branch_id : 1),
@@ -108,6 +144,7 @@ export const createOrder = async (req, res) => {
         placed_by_user_id,
         payment_method ? 'confirmed' : 'pending_payment',
         subtotal,
+        service_charge_total,
         tax_total,
         total,
         notes || null
@@ -238,6 +275,116 @@ export const getOrders = async (req, res) => {
   } catch (err) {
     console.error('getOrders error:', err);
     res.status(500).json({ error: 'Failed to fetch orders' });
+  }
+};
+
+export const getTransactions = async (req, res) => {
+  const {
+    branch_id,
+    status,
+    order_type,
+    payment_method,
+    start_date,
+    end_date,
+    search,
+    page = 1,
+    limit = 50,
+  } = req.query;
+
+  try {
+    const params = [];
+    let conditions = ['1=1'];
+
+    if (branch_id && branch_id !== 'all') {
+      params.push(branch_id);
+      conditions.push(`o.branch_id = $${params.length}`);
+    }
+    if (status && status !== 'all') {
+      params.push(status);
+      conditions.push(`o.status = $${params.length}`);
+    }
+    if (order_type && order_type !== 'all') {
+      params.push(order_type);
+      conditions.push(`o.order_type = $${params.length}`);
+    }
+    if (payment_method && payment_method !== 'all') {
+      params.push(payment_method);
+      conditions.push(`p.method::text = $${params.length}`);
+    }
+    if (start_date) {
+      params.push(start_date);
+      conditions.push(`o.created_at >= $${params.length}`);
+    }
+    if (end_date) {
+      // Include the whole end day
+      params.push(end_date + ' 23:59:59');
+      conditions.push(`o.created_at <= $${params.length}`);
+    }
+    if (search) {
+      params.push(`%${search}%`);
+      conditions.push(`(o.order_number ILIKE $${params.length} OR c.name ILIKE $${params.length} OR c.phone_number ILIKE $${params.length})`);
+    }
+
+    const whereClause = conditions.join(' AND ');
+    const offset = (parseInt(page, 10) - 1) * parseInt(limit, 10);
+
+    // Count total for pagination
+    const countSql = `
+      SELECT COUNT(DISTINCT o.id) as total
+      FROM orders o
+      LEFT JOIN customers c ON o.customer_id = c.id
+      LEFT JOIN payments p ON p.order_id = o.id
+      WHERE ${whereClause}
+    `;
+    const countRes = await query(countSql, params);
+    const total = parseInt(countRes.rows[0].total, 10);
+
+    // Main query
+    params.push(parseInt(limit, 10));
+    params.push(offset);
+    const sql = `
+      SELECT
+        o.id, o.order_number, o.order_type, o.table_number,
+        o.status, o.payment_status,
+        o.subtotal, o.tax_total, o.service_charge_total, o.total, o.discount_total,
+        o.notes, o.created_at, o.updated_at,
+        b.name AS branch_name,
+        c.name AS customer_name, c.phone_number AS customer_phone,
+        u.name AS placed_by_name,
+        COALESCE(p.method::text, 'unpaid') AS payment_method,
+        p.amount AS payment_amount,
+        (
+          SELECT json_agg(json_build_object(
+            'name', pr.name,
+            'quantity', oi.quantity,
+            'unit_price', oi.unit_price
+          ))
+          FROM order_items oi
+          JOIN products pr ON oi.product_id = pr.id
+          WHERE oi.order_id = o.id
+        ) AS items
+      FROM orders o
+      LEFT JOIN branches b ON o.branch_id = b.id
+      LEFT JOIN customers c ON o.customer_id = c.id
+      LEFT JOIN users u ON o.placed_by_user_id = u.id
+      LEFT JOIN payments p ON p.order_id = o.id
+      WHERE ${whereClause}
+      ORDER BY o.created_at DESC
+      LIMIT $${params.length - 1} OFFSET $${params.length}
+    `;
+
+    const result = await query(sql, params);
+
+    res.json({
+      transactions: result.rows,
+      total,
+      page: parseInt(page, 10),
+      limit: parseInt(limit, 10),
+      totalPages: Math.ceil(total / parseInt(limit, 10)),
+    });
+  } catch (err) {
+    console.error('getTransactions error:', err);
+    res.status(500).json({ error: 'Failed to fetch transactions' });
   }
 };
 

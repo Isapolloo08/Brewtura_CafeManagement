@@ -61,6 +61,12 @@ body {
   outline: none;
 }
 
+/* Filled PIN box — higher specificity so it wins over .glass-input regardless of injection order */
+.glass-input.pin-filled {
+  background: rgba(255, 255, 255, 0.98);
+  border-color: #C08552;
+}
+
 .glass-pill {
   background: rgba(245, 230, 211, 0.65);
   backdrop-filter: blur(8px);
@@ -252,4 +258,79 @@ body {
 .hover-lift:hover {
   transform: translateY(-2px);
   box-shadow: 0 12px 28px -8px rgba(60, 42, 33, 0.14);
+}
+
+/* ── Shake (invalid credentials / wrong PIN) ──────────────── */
+@keyframes shake {
+  0%, 100%      { transform: translateX(0); }
+  15%, 45%, 75% { transform: translateX(-7px); }
+  30%, 60%, 90% { transform: translateX(7px); }
+}
+.animate-shake {
+  animation: shake 0.45s cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
+}
+
+/* ── PIN digit pop on entry ──────────────────────────────── */
+@keyframes pinPop {
+  0%   { transform: scale(1); }
+  45%  { transform: scale(1.14); }
+  100% { transform: scale(1); }
+}
+.animate-pin-pop {
+  animation: pinPop 0.22s ease-out;
+}
+
+/* ── Ken Burns drift (login hero photo) ──────────────────── */
+@keyframes kenBurns {
+  from { transform: scale(1) translate(0, 0); }
+  to   { transform: scale(1.12) translate(-1.5%, -1%); }
+}
+.animate-ken-burns {
+  animation: kenBurns 28s ease-in-out infinite alternate;
+}
+
+/* ── Sheen sweep across primary buttons on hover ─────────── */
+@keyframes sheen {
+  0%   { opacity: 0; transform: translateX(0) skewX(-18deg); }
+  12%  { opacity: 1; }
+  100% { opacity: 0; transform: translateX(420%) skewX(-18deg); }
+}
+.btn-sheen {
+  position: relative;
+  overflow: hidden;
+}
+.btn-sheen::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -40%;
+  width: 34%;
+  background: linear-gradient(100deg, transparent, rgba(255, 255, 255, 0.28), transparent);
+  transform: translateX(0) skewX(-18deg);
+  pointer-events: none;
+  opacity: 0;
+}
+.btn-sheen:hover:not(:disabled)::after {
+  animation: sheen 0.75s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* ── Checkmark stroke draw (success states) ──────────────── */
+@keyframes drawCheck {
+  from { stroke-dashoffset: 32; }
+  to   { stroke-dashoffset: 0; }
+}
+.animate-draw-check {
+  stroke-dasharray: 32;
+  animation: drawCheck 0.5s cubic-bezier(0.65, 0, 0.35, 1) 0.15s both;
+}
+
+/* ── Respect the OS reduced-motion preference ────────────── */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import api from '../services/api.js';
+import { Icons } from './Icons';
+import { ShiftReportModal } from './ShiftReportModal';
 
 const fmtMoney = (v) => `$${(v == null ? 0 : Number(v)).toFixed(2)}`;
 const fmtDate = (iso) => iso ? new Date(iso).toLocaleDateString() : '—';
@@ -11,6 +13,7 @@ export function ShiftLogPage() {
   const [selectedBranch, setSelectedBranch] = useState(null); // null = All
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [reportShiftId, setReportShiftId] = useState(null);
 
   useEffect(() => {
     const load = async () => {
@@ -105,15 +108,31 @@ export function ShiftLogPage() {
             <button
               key={b.id}
               type="button"
+              disabled={!b.is_active}
               onClick={() => setSelectedBranch(b.id)}
               className={`text-left glass-card p-4 rounded-xl border transition-all duration-200 ${
-                selectedBranch === b.id
-                  ? 'ring-2 ring-[#C08552] bg-amber-900/10 border-[#C08552]/40'
-                  : 'border-white/60 hover:border-amber-900/20 hover:scale-[1.01]'
+                b.is_active === false
+                  ? 'opacity-50 grayscale cursor-not-allowed border-amber-900/10'
+                  : selectedBranch === b.id
+                    ? 'ring-2 ring-[#C08552] bg-amber-900/10 border-[#C08552]/40'
+                    : 'border-white/60 hover:border-amber-900/20 hover:scale-[1.01]'
               }`}
+              aria-disabled={b.is_active === false}
             >
               <div className="flex items-center justify-between mb-2">
-                <span className="font-heading font-extrabold text-sm text-[#3C2A21] truncate">{b.name}</span>
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <span className="font-heading font-extrabold text-sm text-[#3C2A21] truncate">{b.name}</span>
+                  {b.is_main && (
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-gradient-to-r from-[#693F27] to-[#3C2A21] text-amber-100 text-[9px] font-extrabold uppercase tracking-wide whitespace-nowrap shadow-sm">
+                      <Icons.Star className="w-2.5 h-2.5" />Main
+                    </span>
+                  )}
+                  {b.is_active === false && (
+                    <span className="px-1.5 py-0.5 rounded-full bg-red-500/10 text-red-700 text-[9px] font-extrabold uppercase tracking-wide whitespace-nowrap">
+                      Inactive
+                    </span>
+                  )}
+                </div>
                 <span className="px-2 py-0.5 rounded-full bg-amber-900/10 text-[10px] font-extrabold text-[#693F27] whitespace-nowrap ml-2">
                   {b.count} shifts
                 </span>
@@ -167,6 +186,7 @@ export function ShiftLogPage() {
                   <th className="py-3.5 px-4">Actual</th>
                   <th className="py-3.5 px-4">Variance</th>
                   <th className="py-3.5 px-5">Status</th>
+                  <th className="py-3.5 px-5">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-amber-900/8 text-xs font-semibold">
@@ -194,6 +214,16 @@ export function ShiftLogPage() {
                         {shf.status}
                       </span>
                     </td>
+                    <td className="py-3.5 px-5">
+                      <button
+                        type="button"
+                        onClick={() => setReportShiftId(shf.id)}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#C08552]/15 text-[#693F27] text-[10px] font-extrabold hover:bg-[#C08552]/25 transition-colors"
+                      >
+                        <Icons.Eye className="w-3.5 h-3.5" />
+                        View Full
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -201,6 +231,10 @@ export function ShiftLogPage() {
           </div>
         )}
       </div>
+
+      {reportShiftId !== null && (
+        <ShiftReportModal shiftId={reportShiftId} onClose={() => setReportShiftId(null)} />
+      )}
     </div>
   );
 }

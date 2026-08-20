@@ -73,11 +73,11 @@ export const deleteIngredient = async (req, res) => {
 
 // --- STOCK MOVEMENTS ---
 export const recordStockMovement = async (req, res) => {
-  const { ingredient_id, type, quantity, reference_order_id, note } = req.body;
+  const { ingredient_id, customization_template_id, type, quantity, reference_order_id, note } = req.body;
   const created_by = req.user ? req.user.id : null;
 
-  if (!ingredient_id || !type || !quantity) {
-    return res.status(400).json({ error: 'ingredient_id, type, and quantity are required' });
+  if ((!ingredient_id && !customization_template_id) || !type || !quantity) {
+    return res.status(400).json({ error: 'ingredient_id or customization_template_id, type, and quantity are required' });
   }
 
   const client = await getClient();
@@ -86,9 +86,9 @@ export const recordStockMovement = async (req, res) => {
 
     // Record stock movement
     const movementRes = await client.query(
-      `INSERT INTO stock_movements (ingredient_id, type, quantity, reference_order_id, note, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-      [ingredient_id, type, quantity, reference_order_id || null, note || null, created_by]
+      `INSERT INTO stock_movements (ingredient_id, customization_template_id, type, quantity, reference_order_id, note, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+      [ingredient_id || null, customization_template_id || null, type, quantity, reference_order_id || null, note || null, created_by]
     );
 
     // Update stock levels
@@ -97,16 +97,30 @@ export const recordStockMovement = async (req, res) => {
       delta = -delta;
     }
 
-    if (type === 'adjustment') {
-      await client.query(
-        'UPDATE ingredients SET current_stock = $1, updated_at = now() WHERE id = $2',
-        [quantity, ingredient_id]
-      );
-    } else {
-      await client.query(
-        'UPDATE ingredients SET current_stock = current_stock + $1, updated_at = now() WHERE id = $2',
-        [delta, ingredient_id]
-      );
+    if (customization_template_id) {
+      if (type === 'adjustment') {
+        await client.query(
+          'UPDATE customization_templates SET stock = $1 WHERE id = $2',
+          [Math.round(parseFloat(quantity)), customization_template_id]
+        );
+      } else {
+        await client.query(
+          'UPDATE customization_templates SET stock = stock + $1 WHERE id = $2',
+          [Math.round(delta), customization_template_id]
+        );
+      }
+    } else if (ingredient_id) {
+      if (type === 'adjustment') {
+        await client.query(
+          'UPDATE ingredients SET current_stock = $1, updated_at = now() WHERE id = $2',
+          [quantity, ingredient_id]
+        );
+      } else {
+        await client.query(
+          'UPDATE ingredients SET current_stock = current_stock + $1, updated_at = now() WHERE id = $2',
+          [delta, ingredient_id]
+        );
+      }
     }
 
     await client.query('COMMIT');
@@ -123,9 +137,12 @@ export const recordStockMovement = async (req, res) => {
 export const getStockMovements = async (req, res) => {
   try {
     const result = await query(
-      `SELECT sm.*, i.name as ingredient_name, u.name as created_by_user
+      `SELECT sm.*,
+              COALESCE(i.name, ct.name) as ingredient_name,
+              u.name as created_by_user
        FROM stock_movements sm
-       JOIN ingredients i ON sm.ingredient_id = i.id
+       LEFT JOIN ingredients i ON sm.ingredient_id = i.id
+       LEFT JOIN customization_templates ct ON sm.customization_template_id = ct.id
        LEFT JOIN users u ON sm.created_by = u.id
        ORDER BY sm.created_at DESC
        LIMIT 100`
@@ -395,7 +412,7 @@ export const replaceProductRecipe = async (req, res) => {
   const client = await getClient();
   try {
     await client.query('BEGIN');
-    await client.query('DELETE FROM recipes WHERE product_id = $1', [product_id]);
+    await client.query('DELETE FROM recipes WHERE product_id = $1 AND product_customization_id IS NULL', [product_id]);
     for (const item of items) {
       if (!item.ingredient_id) continue;
       await client.query(

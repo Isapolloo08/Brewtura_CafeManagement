@@ -73,33 +73,7 @@ export function CategoriesPage({ categories, can, onAddCategory, onUpdateCategor
         )}
       </div>
 
-      {/* Category Breakdown */}
-      <div className="glass-card p-5 rounded-2xl border border-white/60">
-        <div className="flex items-center justify-between mb-2">
-          <span className="text-xs font-bold text-amber-900/60">Category Item Distribution</span>
-          <span className="text-[10px] font-bold text-amber-900/40">{categories.length} categories</span>
-        </div>
-        <div className="space-y-2">
-          {categories.map((cat) => {
-            const maxCount = Math.max(...categories.map(c => c.count), 1);
-            const pct = Math.round((cat.count / maxCount) * 100);
-            return (
-              <div key={cat.id}>
-                <div className="flex justify-between text-[11px] font-semibold mb-0.5">
-                  <span className="text-[#3C2A21]">{cat.name}</span>
-                  <span className="text-amber-900/50">{cat.count} items</span>
-                </div>
-                <div className="w-full h-2 rounded-full bg-amber-900/10 overflow-hidden">
-                  <div
-                    className="h-full rounded-full bg-gradient-to-r from-[#C08552] to-[#693F27] animate-progress-in"
-                    style={{ width: `${pct}%` }}
-                  />
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
+
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
         {categories.map((cat) => (

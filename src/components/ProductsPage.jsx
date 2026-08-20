@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Icons } from './Icons';
 import { EditProductModal } from './EditProductModal';
 import { ConfirmModal } from './ConfirmModal';
@@ -58,6 +58,53 @@ export function ProductsPage({ products, categories, ingredients, can, onUpdateP
       setSelectedProduct(null);
     }
   };
+
+  // ─── Can Make (yield) calculation ───
+  const calcYield = (rows, stockMap) => {
+    if (!rows || rows.length === 0) return null;
+    let units = Infinity;
+    let limitedBy = null;
+    rows.forEach((r) => {
+      const ing = stockMap[r.ingredientId];
+      const qty = r.amount;
+      if (!ing || !(qty > 0)) return;
+      const u = Math.floor(ing.stock / qty);
+      if (u < units) {
+        units = u;
+        limitedBy = { name: r.name, unit: r.unit, remaining: ing.stock };
+      }
+    });
+    if (units === Infinity) return null;
+    return { units, limitedBy };
+  };
+
+  const yields = useMemo(() => {
+    const stockMap = {};
+    ingredients.forEach((ing) => { stockMap[ing.id] = { stock: ing.stock, unit: ing.unit }; });
+    const result = {};
+    products.forEach((p) => {
+      const recipe = p.recipe || [];
+      const baseRows = recipe.filter((r) => !r.customizationId);
+      const base = calcYield(baseRows, stockMap);
+      const sizes = (p.customizations || [])
+        .filter((v) => !v.customization_type || v.customization_type === 'size')
+        .map((size) => {
+          const sizeRows = recipe.filter((r) => r.customizationId === String(size.id));
+          const y = sizeRows.length > 0 ? calcYield(sizeRows, stockMap) : base;
+          return { id: size.id, name: size.name, yield: y };
+        });
+      result[p.id] = { base, sizes };
+    });
+    return result;
+  }, [products, ingredients]);
+
+  const selectedRecipe = selectedProduct?.recipe || [];
+  const baseRecipeRows = selectedRecipe.filter((r) => !r.customizationId);
+  const sizeRecipeMap = {};
+  selectedRecipe.filter((r) => r.customizationId).forEach((r) => {
+    if (!sizeRecipeMap[r.customizationId]) sizeRecipeMap[r.customizationId] = [];
+    sizeRecipeMap[r.customizationId].push(r);
+  });
 
   return (
     <div className="space-y-8 animate-fadeIn">
@@ -131,6 +178,7 @@ export function ProductsPage({ products, categories, ingredients, can, onUpdateP
                   <th className="py-3 px-4">Category</th>
                   <th className="py-3 px-4">Price</th>
                   <th className="py-3 px-4">Status</th>
+                  <th className="py-3 px-4">Can Make</th>
                   <th className="py-3 px-4 text-right">Actions</th>
                 </tr>
               </thead>
@@ -192,6 +240,16 @@ export function ProductsPage({ products, categories, ingredients, can, onUpdateP
                             }`}>
                             {product.status}
                           </span>
+                        )}
+                      </td>
+
+                      <td className="py-3 px-4">
+                        {yields[product.id]?.base ? (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-500/10 text-emerald-800 text-[11px] font-extrabold">
+                            ~{yields[product.id].base.units}
+                          </span>
+                        ) : (
+                          <span className="text-[11px] text-amber-900/40 font-medium">No recipe</span>
                         )}
                       </td>
 
@@ -263,18 +321,67 @@ export function ProductsPage({ products, categories, ingredients, can, onUpdateP
                 <div className="space-y-1.5 text-xs text-amber-900/80">
                   <p><span className="font-bold text-[#3C2A21]">Category:</span> {selectedProduct.category}</p>
                   <p><span className="font-bold text-[#3C2A21]">Status:</span> {selectedProduct.status}</p>
-                  <p><span className="font-bold text-[#3C2A21]">Recipe Items:</span> {selectedProduct.recipe?.length || 0}</p>
-                  {selectedProduct.recipe && selectedProduct.recipe.length > 0 && (
+                  <p><span className="font-bold text-[#3C2A21]">Recipe Items:</span> {baseRecipeRows.length} base{Object.keys(sizeRecipeMap).length > 0 ? ` + ${Object.keys(sizeRecipeMap).length} size recipe(s)` : ''}</p>
+                  {(baseRecipeRows.length > 0 || Object.keys(sizeRecipeMap).length > 0) && (
                     <div className="mt-2 space-y-1">
-                      {selectedProduct.recipe.map((r, idx) => (
+                      {baseRecipeRows.map((r, idx) => (
                         <p key={idx} className="text-[11px] text-amber-900/70">
                           {r.name}: {r.amount} {r.unit}
                         </p>
                       ))}
+                      {Object.entries(sizeRecipeMap).map(([cid, rows]) => {
+                        const size = (selectedProduct.customizations || []).find(v => String(v.id) === cid);
+                        return (
+                          <div key={cid} className="pt-1">
+                            <p className="text-[10px] font-bold text-[#693F27] uppercase tracking-wide">{size?.name || 'Custom'}</p>
+                            {rows.map((r, idx) => (
+                              <p key={idx} className="text-[11px] text-amber-900/70">
+                                {r.name}: {r.amount} {r.unit}
+                              </p>
+                            ))}
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
                 </div>
               </div>
+
+              {yields[selectedProduct.id] && (
+                <div className="mt-4 pt-4 border-t border-amber-900/10">
+                  <h4 className="font-bold text-xs text-[#3C2A21] mb-2">Can Make (from current stock)</h4>
+                  <div className="space-y-1.5">
+                    {yields[selectedProduct.id].base ? (
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="font-semibold text-amber-900/80">Standard</span>
+                        <div className="text-right">
+                          <span className="font-extrabold text-[#693F27]">~{yields[selectedProduct.id].base.units}</span>
+                          {yields[selectedProduct.id].base.limitedBy && (
+                            <p className="text-[10px] text-amber-900/50 font-medium">
+                              Limited by: {yields[selectedProduct.id].base.limitedBy.name} ({yields[selectedProduct.id].base.limitedBy.remaining} {yields[selectedProduct.id].base.limitedBy.unit} left)
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="text-[11px] text-amber-900/50 font-medium">No base recipe set</p>
+                    )}
+                    {yields[selectedProduct.id].sizes.map((s) => (
+                      <div key={s.id} className="flex items-center justify-between text-xs">
+                        <span className="font-semibold text-amber-900/80">{s.name}</span>
+                        <div className="text-right">
+                          <span className="font-extrabold text-[#693F27]">{s.yield ? `~${s.yield.units}` : '—'}</span>
+                          {s.yield?.limitedBy && (
+                            <p className="text-[10px] text-amber-900/50 font-medium">
+                              Limited by: {s.yield.limitedBy.name} ({s.yield.limitedBy.remaining} {s.yield.limitedBy.unit} left)
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {selectedProduct.customizations && selectedProduct.customizations.filter(v => !v.customization_type || v.customization_type === 'size').length > 0 && (
                 <div className="mt-4 pt-4 border-t border-amber-900/10">

@@ -139,12 +139,7 @@ export const INITIAL_SUPPLIERS = [
   { id: 'sup-3', name: 'EcoPack Solutions Ltd.', contactPerson: 'Jason Wright', phone: '+1 (555) 443-9900', email: 'jason@ecopack.io', address: '808 Industrial Pkwy, Portland OR', activeOrders: 1 },
 ];
 
-export const INITIAL_EMPLOYEES = [
-  { id: 'emp-101', name: 'Marco V.', role: 'Administrator', employeeId: 'ADM-001', status: 'Active', email: 'marco@brewtura.com', phone: '+1 (555) 019-2831', avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80' },
-  { id: 'emp-102', name: 'Elena Rossi', role: 'Manager', employeeId: 'MGR-002', status: 'Active', email: 'elena.r@brewtura.com', phone: '+1 (555) 014-9922', avatar: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&w=150&q=80' },
-  { id: 'emp-103', name: 'Julian Chen', role: 'Cashier', employeeId: 'CSH-104', status: 'Active', email: 'julian.c@brewtura.com', phone: '+1 (555) 018-4411', avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=150&q=80' },
-  { id: 'emp-104', name: 'Sarah Miller', role: 'Inventory Staff', employeeId: 'INV-201', status: 'Active', email: 'sarah.m@brewtura.com', phone: '+1 (555) 016-7733', avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=150&q=80' },
-];
+export const INITIAL_EMPLOYEES = [];
 
 export const INITIAL_ORDERS = [
   {

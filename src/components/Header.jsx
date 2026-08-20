@@ -1,6 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { Icons } from './Icons';
 
+const fallbackAvatar = (name) => {
+  const initial = (name || 'U').charAt(0).toUpperCase();
+  return `data:image/svg+xml;utf8,${encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><rect width="32" height="32" fill="#C08552"/><text x="16" y="21" font-family="Arial, sans-serif" font-size="14" font-weight="bold" fill="#FFFDF9" text-anchor="middle">${initial}</text></svg>`
+  )}`;
+};
+
 export function Header({ currentUser, onSwitchRole, activeTab, onOpenNewProductModal, onToggleMobileMenu, onNavigate }) {
   const [scrolled, setScrolled] = useState(false);
   const [isMaximized, setIsMaximized] = useState(false);
@@ -90,18 +97,25 @@ export function Header({ currentUser, onSwitchRole, activeTab, onOpenNewProductM
           {/* Divider */}
           <div className={`hidden md:block w-px h-8 transition-all duration-500 ${scrolled ? 'bg-amber-900/10' : 'bg-amber-900/5'}`} />
 
-          {/* User profile */}
-          <div className="flex items-center gap-2.5">
+          {/* User profile — click to open Profile page */}
+          <button
+            onClick={() => onNavigate && onNavigate('profile')}
+            className="flex items-center gap-2.5 rounded-2xl px-2 py-1 -mx-2 -my-1 hover:bg-amber-900/8 transition-all duration-200 group"
+            title="View my profile"
+          >
             <div className="hidden sm:flex flex-col items-end leading-tight">
               <span className={`text-xs font-bold transition-colors duration-500 ${scrolled ? 'text-[#3C2A21]' : 'text-[#3C2A21]/60'}`}>{currentUser?.name ?? 'Julian Costa'}</span>
               <span className={`text-[10px] font-medium transition-colors duration-500 ${scrolled ? 'text-amber-900/55' : 'text-amber-900/30'}`}>{currentUser?.role ?? 'Store Manager'}</span>
             </div>
             <img
-              src={currentUser?.avatar ?? currentUser?.avatarUrl ?? 'https://i.pravatar.cc/64?img=13'}
+              src={currentUser?.avatar || currentUser?.avatarUrl || fallbackAvatar(currentUser?.name)}
               alt={currentUser?.name ?? 'User avatar'}
-              className="w-8 h-8 rounded-full object-cover ring-2 ring-white/70 shadow-sm"
+              onError={e => { e.currentTarget.src = fallbackAvatar(currentUser?.name); }}
+              className="w-8 h-8 rounded-full object-cover shrink-0 ring-2 ring-white/70 shadow-sm group-hover:ring-[#C08552]/60 transition-all duration-200"
+              style={{ imageRendering: 'high-quality' }}
             />
-          </div>
+          </button>
+
 
           {/* Window controls */}
           <div className="flex items-center -mr-2 sm:-mr-4 ml-2">

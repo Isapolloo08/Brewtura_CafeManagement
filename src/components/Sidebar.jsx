@@ -1,6 +1,14 @@
 import React, { useState } from 'react';
 import { Icons } from './Icons';
+import { canAccessPage, normalizeRole } from '../utils/permissions.js';
 import brandLogo from '../assets/Brewtura_Logo.png';
+
+const fallbackAvatar = (name) => {
+  const initial = (name || 'U').charAt(0).toUpperCase();
+  return `data:image/svg+xml;utf8,${encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="36" height="36"><rect width="36" height="36" fill="#C08552"/><text x="18" y="24" font-family="Arial, sans-serif" font-size="16" font-weight="bold" fill="#FFFDF9" text-anchor="middle">${initial}</text></svg>`
+  )}`;
+};
 
 export function Sidebar({ activeTab, setActiveTab, activeSubTab, onSelectSubItem, currentUser, onLogout, lowStockCount, isMobileOpen, setIsMobileOpen }) {
   const [expandedItems, setExpandedItems] = useState(() => {
@@ -20,10 +28,10 @@ export function Sidebar({ activeTab, setActiveTab, activeSubTab, onSelectSubItem
       label: 'Menu Management',
       icon: Icons.CoffeeCup,
       children: [
-        { label: 'Categories', icon: Icons.Folder },
-        { label: 'Products', icon: Icons.Package },
-        { label: 'Customizations', icon: Icons.Shuffle },
-        { label: 'Recipes', icon: Icons.Flask },
+        { id: 'categories', label: 'Categories', icon: Icons.Folder },
+        { id: 'products', label: 'Products', icon: Icons.Package },
+        { id: 'customizations', label: 'Customizations', icon: Icons.Shuffle },
+        { id: 'recipes', label: 'Recipes', icon: Icons.Flask },
       ]
     },
     {
@@ -32,22 +40,23 @@ export function Sidebar({ activeTab, setActiveTab, activeSubTab, onSelectSubItem
       icon: Icons.Inventory,
       badge: lowStockCount > 0 ? lowStockCount : null,
       children: [
-        { label: 'Ingredients', icon: Icons.Sprout },
-        { label: 'Stock Movements', icon: Icons.ArrowUpDown },
-        { label: 'Purchase Orders', icon: Icons.Clipboard },
-        { label: 'Suppliers', icon: Icons.Truck },
+        { id: 'ingredients', label: 'Ingredients', icon: Icons.Sprout },
+        { id: 'stock_movements', label: 'Stock Movements', icon: Icons.ArrowUpDown },
+        { id: 'purchase_orders', label: 'Purchase Orders', icon: Icons.Clipboard },
+        { id: 'suppliers', label: 'Suppliers', icon: Icons.Truck },
       ]
     },
     { id: 'kitchen', label: 'Kitchen Display', icon: Icons.Kitchen },
+    { id: 'transactions', label: 'Transactions', icon: Icons.Transactions },
     {
       id: 'reports',
       label: 'Reports',
       icon: Icons.Reports,
       children: [
-        { label: 'Sales', icon: Icons.ChartBar },
-        { label: 'Best Sellers', icon: Icons.Star },
-        { label: 'Inventory', icon: Icons.Scale },
-        { label: 'Shift Reports', icon: Icons.Clock },
+        { id: 'sales', label: 'Sales', icon: Icons.ChartBar },
+        { id: 'best_sellers', label: 'Best Sellers', icon: Icons.Star },
+        { id: 'inventory', label: 'Inventory', icon: Icons.Scale },
+        { id: 'shift_reports', label: 'Shift Reports', icon: Icons.Clock },
       ]
     },
     { id: 'users', label: 'Staff Management', icon: Icons.Users },
@@ -56,16 +65,27 @@ export function Sidebar({ activeTab, setActiveTab, activeSubTab, onSelectSubItem
       label: 'System Settings',
       icon: Icons.Settings,
       children: [
-        { label: 'Branches', icon: Icons.Truck },
-        { label: 'Tax & VAT', icon: Icons.Percent },
-        { label: 'Receipt Layout', icon: Icons.Receipt },
-        { label: 'Hardware Printers', icon: Icons.Printer },
-        { label: 'Payment Gateways', icon: Icons.CreditCard },
-        { label: 'Email Setup', icon: Icons.Mail },
-        { label: 'Database Backup', icon: Icons.Database },
+        { id: 'branches', label: 'Branches', icon: Icons.Truck },
+        { id: 'tax_vat', label: 'Tax & VAT', icon: Icons.Percent },
+        { id: 'receipt_layout', label: 'Receipt Layout', icon: Icons.Receipt },
+        { id: 'branding', label: 'Store Branding', icon: Icons.CoffeeCup },
+        { id: 'hardware_printers', label: 'Hardware Printers', icon: Icons.Printer },
+        { id: 'payment_gateways', label: 'Payment Gateways', icon: Icons.CreditCard },
+        { id: 'communications', label: 'Communications', icon: Icons.MessageSquare },
+        { id: 'database_backup', label: 'Database Backup', icon: Icons.Database },
       ]
     },
   ];
+
+  // Only keep pages/sub-pages the signed-in role is allowed to open.
+  const role = normalizeRole(currentUser?.role);
+  const visibleNavItems = navItems
+    .map((item) => {
+      if (!item.children) return canAccessPage(role, item.id) ? item : null;
+      const children = item.children.filter((child) => canAccessPage(role, item.id, child.id));
+      return children.length ? { ...item, children } : null;
+    })
+    .filter(Boolean);
 
   return (
     <>
@@ -103,7 +123,7 @@ export function Sidebar({ activeTab, setActiveTab, activeSubTab, onSelectSubItem
 
           {/* Navigation Section (scrollable) */}
           <nav className="space-y-1 flex-1 overflow-y-auto min-h-0 py-3">
-            {navItems.map((item) => {
+            {visibleNavItems.map((item) => {
               const isActive = activeTab === item.id;
               const IconComp = item.icon;
               return (
@@ -182,9 +202,11 @@ export function Sidebar({ activeTab, setActiveTab, activeSubTab, onSelectSubItem
         <div className="pt-4 border-t border-amber-900/10 space-y-3 shrink-0">
           <div className="flex items-center gap-3 p-2.5 rounded-xl bg-[#FFFDF9]/60 backdrop-blur-sm border border-amber-900/10 shadow-sm">
             <img
-              src={currentUser?.avatar || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80"}
-              alt={currentUser?.name}
-              className="w-9 h-9 rounded-full object-cover ring-2 ring-[#C08552]/40"
+              src={currentUser?.avatar || fallbackAvatar(currentUser?.name)}
+              alt={currentUser?.name || 'User'}
+              onError={e => { e.currentTarget.src = fallbackAvatar(currentUser?.name); }}
+              className="w-9 h-9 rounded-full object-cover shrink-0 ring-2 ring-[#C08552]/40"
+              style={{ imageRendering: 'high-quality' }}
             />
             <div className="flex-1 min-w-0">
               <p className="text-xs font-bold text-[#3C2A21] truncate">{currentUser?.name || 'Marco V.'}</p>

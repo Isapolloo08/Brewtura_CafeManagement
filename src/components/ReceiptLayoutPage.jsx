@@ -1,39 +1,60 @@
 import React, { useState } from 'react';
 import { Icons } from './Icons';
 
-export function ReceiptLayoutPage({ settings, onUpdateSettings }) {
-  const [form, setForm] = useState({
+// Settings come back from the API as TEXT, so booleans arrive as 'true'/'false'.
+const toBool = (v) => v === true || v === 'true' || v === 1 || v === '1';
+
+const shapeClass = (shape) =>
+  shape === 'circle'
+    ? 'rounded-full'
+    : shape === 'rounded'
+      ? 'rounded-2xl'
+      : 'rounded-none';
+
+export function ReceiptLayoutPage({ settings, onUpdateSettings, onGoToBranding }) {
+  const vatPct = Math.round((parseFloat(settings?.vatRate) || 0) * 100 * 10) / 10;
+
+  // The logo itself (plus its shape and size) is owned by the Store Branding
+  // page. Read it live from settings so editing it there instantly updates the
+  // receipt — this page only decides whether it gets printed.
+  const logo = settings?.logo || '';
+  const logoShape = settings?.logoShape || 'circle';
+  const logoScale = parseFloat(settings?.logoScale) || 1;
+
+  const readForm = () => ({
     storeName: settings?.storeName ?? '',
     taxId: settings?.taxId ?? '',
     address: settings?.address ?? '',
-    vatRate: settings?.vatRate ?? 0,
+    vatRate: vatPct,
     receiptHeader: settings?.receiptHeader ?? '',
     receiptFooter: settings?.receiptFooter ?? '',
-    qrCodeEnabled: settings?.qrCodeEnabled ?? false,
+    qrCodeEnabled: toBool(settings?.qrCodeEnabled),
+    receiptShowLogo:
+      settings?.receiptShowLogo === undefined
+        ? true
+        : toBool(settings.receiptShowLogo),
   });
+
+  const [form, setForm] = useState(readForm);
   const [msg, setMsg] = useState({ text: '', type: '' });
 
-  const hasChanges = Object.keys(form).some(
-    (k) => form[k] !== settings?.[k]
-  );
+  const saved = readForm();
+  const hasChanges = Object.keys(form).some((k) => form[k] !== saved[k]);
+  const showLogo = !!logo && form.receiptShowLogo;
 
   const handleSave = (e) => {
     e.preventDefault();
-    onUpdateSettings({ ...settings, ...form });
+    onUpdateSettings({
+      ...settings,
+      ...form,
+      vatRate: (parseFloat(form.vatRate) || 0) / 100,
+    });
     setMsg({ text: 'Receipt layout saved successfully!', type: 'success' });
     setTimeout(() => setMsg({ text: '', type: '' }), 4000);
   };
 
   const handleReset = () => {
-    setForm({
-      storeName: settings?.storeName ?? '',
-      taxId: settings?.taxId ?? '',
-      address: settings?.address ?? '',
-      vatRate: settings?.vatRate ?? 0,
-      receiptHeader: settings?.receiptHeader ?? '',
-      receiptFooter: settings?.receiptFooter ?? '',
-      qrCodeEnabled: settings?.qrCodeEnabled ?? false,
-    });
+    setForm(readForm());
   };
 
   const subtotal = 8.9;
@@ -73,6 +94,80 @@ export function ReceiptLayoutPage({ settings, onUpdateSettings }) {
             )}
 
             <form onSubmit={handleSave} className="space-y-5">
+              <div className="p-4 rounded-2xl bg-white/40 border border-[#C08552]/10 space-y-3">
+                <div className="flex items-center justify-between gap-3">
+                  <label className="flex items-center gap-1.5 text-[11px] font-extrabold text-[#4A2E2A] uppercase tracking-wider">
+                    <Icons.Camera className="w-3 h-3 text-[#C08552]/70" />
+                    Receipt Logo
+                  </label>
+                  {onGoToBranding && (
+                    <button
+                      type="button"
+                      onClick={onGoToBranding}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-extrabold text-[#693F27] hover:bg-amber-900/10 transition-all active:scale-95"
+                    >
+                      <Icons.Edit className="w-3 h-3" />
+                      Edit in Store Branding
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-4">
+                  <div
+                    className={`w-16 h-16 bg-white/70 border border-[#C08552]/20 flex items-center justify-center overflow-hidden shrink-0 shadow-inner ${shapeClass(logoShape)}`}
+                  >
+                    {logo ? (
+                      <img
+                        src={logo}
+                        alt="Store Logo"
+                        className="w-11 h-11 object-contain"
+                        style={{ transform: `scale(${logoScale})` }}
+                      />
+                    ) : (
+                      <Icons.CoffeeCup className="w-7 h-7 text-[#3C2A21]/25" />
+                    )}
+                  </div>
+
+                  <div className="min-w-0">
+                    {logo ? (
+                      <label className="flex items-center gap-3 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={form.receiptShowLogo}
+                          onChange={(e) =>
+                            setForm((p) => ({
+                              ...p,
+                              receiptShowLogo: e.target.checked,
+                            }))
+                          }
+                          className="rounded-md text-[#C08552] focus:ring-[#C08552] focus:ring-offset-0 w-4 h-4 border-[#C08552]/40"
+                        />
+                        <div>
+                          <span className="font-extrabold text-xs text-[#3C2A21]">
+                            Print Store Logo on Receipt
+                          </span>
+                          <p className="text-[10px] text-[#3C2A21]/50 font-medium mt-0.5 leading-relaxed">
+                            Uses the {logoShape} logo at{' '}
+                            {Math.round(logoScale * 100)}% from Store Branding —
+                            updating it there refreshes this receipt
+                            automatically.
+                          </p>
+                        </div>
+                      </label>
+                    ) : (
+                      <p className="text-[10px] text-[#3C2A21]/50 font-medium leading-relaxed">
+                        No logo uploaded yet. Add one in{' '}
+                        <span className="font-extrabold text-[#693F27]">
+                          Store Branding
+                        </span>{' '}
+                        and it will appear here and at the top of every printed
+                        receipt.
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="group">
                   <label className="flex items-center gap-1.5 text-[11px] font-extrabold text-[#4A2E2A] uppercase tracking-wider mb-1.5">
@@ -238,6 +333,18 @@ export function ReceiptLayoutPage({ settings, onUpdateSettings }) {
 
             <div className="rounded-2xl bg-[#FAF4EB] border border-[#C08552]/15 p-5 font-mono text-[11px] text-[#3C2A21] space-y-3 shadow-inner">
               <div className="text-center space-y-1">
+                {showLogo && (
+                  <div
+                    className={`w-16 h-16 mx-auto mb-2 bg-white border border-[#C08552]/20 flex items-center justify-center overflow-hidden shadow-sm ${shapeClass(logoShape)}`}
+                  >
+                    <img
+                      src={logo}
+                      alt="Store Logo"
+                      className="w-12 h-12 object-contain"
+                      style={{ transform: `scale(${logoScale})` }}
+                    />
+                  </div>
+                )}
                 <p className="font-extrabold text-sm uppercase tracking-wider text-[#3C2A21]">
                   {form.storeName || 'Your Store Name'}
                 </p>

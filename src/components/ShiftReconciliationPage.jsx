@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import api from '../services/api.js';
+import { Icons } from './Icons';
+import { ShiftReportModal } from './ShiftReportModal';
 
 const fmtMoney = (v) => `$${(v == null ? 0 : Number(v)).toFixed(2)}`;
 const fmtDate = (iso) => iso ? new Date(iso).toLocaleDateString() : '—';
@@ -9,11 +11,15 @@ export function ShiftReconciliationPage() {
   const [shifts, setShifts] = useState([]);
   const [branches, setBranches] = useState([]);
   const [selectedBranch, setSelectedBranch] = useState(null); // null = All
+  const [selectedShiftId, setSelectedShiftId] = useState(null);
+  const [reportShiftId, setReportShiftId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
   const [openingCash, setOpeningCash] = useState(150.00);
   const [actualCash, setActualCash] = useState(612.20);
+  const [cashSales, setCashSales] = useState(462.20);
+  const [digitalPayments, setDigitalPayments] = useState(820.50);
   const [shiftSuccessMsg, setShiftSuccessMsg] = useState('');
 
   useEffect(() => {
@@ -60,14 +66,53 @@ export function ShiftReconciliationPage() {
     ? 'All Branches'
     : branches.find(b => b.id === selectedBranch)?.name || 'Branch';
 
-  const cashSales = 462.20;
-  const digitalPayments = 820.50;
   const expectedCash = Number(openingCash) + Number(cashSales);
   const difference = Number(actualCash) - expectedCash;
 
-  const handleReconcileShift = (e) => {
+  const populateAudit = (branchId) => {
+    const list = branchId === null
+      ? shifts
+      : shifts.filter(s => s.branch_id === branchId);
+    setOpeningCash(list.reduce((sum, s) => sum + (s.opening_cash || 0), 0));
+    setCashSales(list.reduce((sum, s) => sum + (s.cash_sales || 0), 0));
+    setDigitalPayments(list.reduce((sum, s) => sum + (s.digital_payments || 0), 0));
+    setActualCash(list.reduce((sum, s) => sum + (s.actual_cash || 0), 0));
+  };
+
+  const selectBranch = (branchId) => {
+    setSelectedBranch(branchId);
+    setSelectedShiftId(null);
+    populateAudit(branchId);
+  };
+
+  const selectShiftLog = (shf) => {
+    setSelectedShiftId(shf.id);
+    setOpeningCash(shf.opening_cash || 0);
+    setCashSales(shf.cash_sales || 0);
+    setDigitalPayments(shf.digital_payments || 0);
+    setActualCash(shf.actual_cash === null ? '' : shf.actual_cash);
+  };
+
+  const handleReconcileShift = async (e) => {
     e.preventDefault();
-    setShiftSuccessMsg(`Shift reconciled! Variance: ${difference === 0 ? '$0.00 (Perfect Match)' : `$${difference.toFixed(2)}`}`);
+    if (!selectedShiftId) {
+      setShiftSuccessMsg('Select a shift log first to update it.');
+      setTimeout(() => setShiftSuccessMsg(''), 5000);
+      return;
+    }
+    try {
+      await api.updateShift(selectedShiftId, {
+        cash_drawer_start: Number(openingCash),
+        cash_drawer_end: actualCash === '' ? undefined : Number(actualCash),
+      });
+      setShiftSuccessMsg(`Shift #${selectedShiftId} updated! Variance: ${difference === 0 ? '$0.00 (Perfect Match)' : `$${difference.toFixed(2)}`}`);
+      const res = await api.getShifts();
+      if (Array.isArray(res)) setShifts(res);
+      setSelectedShiftId(null);
+    } catch (err) {
+      console.error('Failed to update shift:', err);
+      setShiftSuccessMsg('Failed to update shift. Check the server connection.');
+    }
     setTimeout(() => setShiftSuccessMsg(''), 5000);
   };
 
@@ -83,7 +128,7 @@ export function ShiftReconciliationPage() {
           {/* All Branches cell */}
           <button
             type="button"
-            onClick={() => setSelectedBranch(null)}
+            onClick={() => selectBranch(null)}
             className={`text-left glass-card p-4 rounded-xl border transition-all duration-200 ${
               selectedBranch === null
                 ? 'ring-2 ring-[#C08552] bg-amber-900/10 border-[#C08552]/40'
@@ -110,15 +155,31 @@ export function ShiftReconciliationPage() {
             <button
               key={b.id}
               type="button"
-              onClick={() => setSelectedBranch(b.id)}
+              disabled={!b.is_active}
+              onClick={() => selectBranch(b.id)}
               className={`text-left glass-card p-4 rounded-xl border transition-all duration-200 ${
-                selectedBranch === b.id
-                  ? 'ring-2 ring-[#C08552] bg-amber-900/10 border-[#C08552]/40'
-                  : 'border-white/60 hover:border-amber-900/20 hover:scale-[1.01]'
+                b.is_active === false
+                  ? 'opacity-50 grayscale cursor-not-allowed border-amber-900/10'
+                  : selectedBranch === b.id
+                    ? 'ring-2 ring-[#C08552] bg-amber-900/10 border-[#C08552]/40'
+                    : 'border-white/60 hover:border-amber-900/20 hover:scale-[1.01]'
               }`}
+              aria-disabled={b.is_active === false}
             >
               <div className="flex items-center justify-between mb-2">
-                <span className="font-heading font-extrabold text-sm text-[#3C2A21] truncate">{b.name}</span>
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <span className="font-heading font-extrabold text-sm text-[#3C2A21] truncate">{b.name}</span>
+                  {b.is_main && (
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-gradient-to-r from-[#693F27] to-[#3C2A21] text-amber-100 text-[9px] font-extrabold uppercase tracking-wide whitespace-nowrap shadow-sm">
+                      <Icons.Star className="w-2.5 h-2.5" />Main
+                    </span>
+                  )}
+                  {b.is_active === false && (
+                    <span className="px-1.5 py-0.5 rounded-full bg-red-500/10 text-red-700 text-[9px] font-extrabold uppercase tracking-wide whitespace-nowrap">
+                      Inactive
+                    </span>
+                  )}
+                </div>
                 <span className="px-2 py-0.5 rounded-full bg-amber-900/10 text-[10px] font-extrabold text-[#693F27] whitespace-nowrap ml-2">
                   {b.count} shifts
                 </span>
@@ -163,11 +224,11 @@ export function ShiftReconciliationPage() {
             <div className="p-3 rounded-xl bg-amber-900/5 space-y-2 text-xs font-semibold">
               <div className="flex justify-between text-amber-900/65">
                 <span>+ Cash Sales Today:</span>
-                <span className="font-bold text-[#3C2A21]">${cashSales.toFixed(2)}</span>
+                <span className="font-bold text-[#3C2A21]">${Number(cashSales).toFixed(2)}</span>
               </div>
               <div className="flex justify-between text-amber-900/65">
                 <span>+ Digital Payments:</span>
-                <span className="font-bold text-[#3C2A21]">${digitalPayments.toFixed(2)}</span>
+                <span className="font-bold text-[#3C2A21]">${Number(digitalPayments).toFixed(2)}</span>
               </div>
               <div className="flex justify-between border-t border-amber-900/10 pt-2 font-extrabold text-[#3C2A21]">
                 <span>Expected Cash:</span>
@@ -222,11 +283,18 @@ export function ShiftReconciliationPage() {
                     <th className="py-3 pr-4">Actual</th>
                     <th className="py-3 pr-4">Diff</th>
                     <th className="py-3">Status</th>
+                    <th className="py-3 pl-4">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-amber-900/8 text-xs font-semibold">
                   {filtered.map((shf) => (
-                    <tr key={shf.id} className="hover:bg-amber-900/4 transition-colors">
+                    <tr key={shf.id}
+                      onClick={() => selectShiftLog(shf)}
+                      className={`cursor-pointer transition-colors ${
+                        selectedShiftId === shf.id
+                          ? 'bg-[#C08552]/15 hover:bg-[#C08552]/20'
+                          : 'hover:bg-amber-900/4'
+                      }`}>
                       <td className="py-3.5 pr-4 font-bold text-[#3C2A21]">{shf.cashier}</td>
                       <td className="py-3.5 pr-4 text-amber-900/55">{fmtDate(shf.opened_at)}</td>
                       <td className="py-3.5 pr-4 text-amber-900/55 whitespace-nowrap">
@@ -247,6 +315,16 @@ export function ShiftReconciliationPage() {
                           : 'bg-amber-500/12 text-amber-900'
                         }`}>{shf.status}</span>
                       </td>
+                      <td className="py-3.5 pl-4">
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); setReportShiftId(shf.id); }}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#C08552]/15 text-[#693F27] text-[10px] font-extrabold hover:bg-[#C08552]/25 transition-colors"
+                        >
+                          <Icons.Eye className="w-3.5 h-3.5" />
+                          View Full
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -255,6 +333,10 @@ export function ShiftReconciliationPage() {
           )}
         </div>
       </div>
+
+      {reportShiftId !== null && (
+        <ShiftReportModal shiftId={reportShiftId} onClose={() => setReportShiftId(null)} />
+      )}
     </div>
   );
 }

@@ -6,8 +6,9 @@ import { ReceiptLayoutPage } from './ReceiptLayoutPage';
 import { PrinterSettingsPage } from './PrinterSettingsPage';
 import { PaymentGatewaysPage } from './PaymentGatewaysPage';
 import { BackupPage } from './BackupPage';
-import { EmailSetupPage } from './EmailSetupPage';
+import { CommunicationsSetupPage } from './CommunicationsSetupPage';
 import { BranchesPage } from './BranchesPage';
+import { BrandingPage } from './BrandingPage';
 
 const PAGE_INFO = {
   tax_vat: {
@@ -22,8 +23,13 @@ const PAGE_INFO = {
   },
   receipt_layout: {
     badge: 'System Settings',
-    title: 'Receipt Customizer',
-    desc: 'Customize the layout and content of printed receipts.',
+    title: 'Receipt Template & Customization',
+    desc: 'Customize the appearance of printed thermal receipts, e-receipt headers, barcode formatting, and promotional footer messages.',
+  },
+  branding: {
+    badge: 'System Settings',
+    title: 'Store Branding',
+    desc: 'Set your store name and logo. These appear across the cashier POS system, receipts, and reports.',
   },
   hardware_printers: {
     badge: 'System Settings',
@@ -40,10 +46,15 @@ const PAGE_INFO = {
     title: 'Data Integrity & Backups',
     desc: 'Manage automated and manual backups, restore points, and integrity verification for your shop data.',
   },
+  communications: {
+    badge: 'System Settings',
+    title: 'Communications Setup',
+    desc: 'Manage inbound & outbound channels (Gmail & GSM SIM Modem) for supplier purchase orders, automatic reply scanning, and SMS alerts.',
+  },
   email_setup: {
     badge: 'System Settings',
-    title: 'Email Setup',
-    desc: 'Connect a Gmail inbox so supplier replies and deliveries come straight into the system.',
+    title: 'Communications Setup',
+    desc: 'Manage inbound & outbound channels (Gmail & GSM SIM Modem) for supplier purchase orders, automatic reply scanning, and SMS alerts.',
   },
 };
 
@@ -70,9 +81,10 @@ function TitleBar({ info }) {
   );
 }
 
-export function SystemSettings({ settings, onUpdateSettings, activeSubTab, can, ingredients, recipeTemplates, onRefreshRecipeTemplates, suppliers }) {
+export function SystemSettings({ settings, onUpdateSettings, activeSubTab, onSetSubTab, can, ingredients, recipeTemplates, onRefreshRecipeTemplates, suppliers }) {
   const tab = activeSubTab || 'tax_vat';
   const info = PAGE_INFO[tab] || PAGE_INFO.tax_vat;
+  const hasOwnHeader = tab === 'communications' || tab === 'email_setup';
 
   const renderPage = () => {
     switch (tab) {
@@ -81,15 +93,18 @@ export function SystemSettings({ settings, onUpdateSettings, activeSubTab, can, 
       case 'tax_vat':
         return <TaxSettingsPage settings={settings} onUpdateSettings={async (updated) => { onUpdateSettings(updated); try { await api.updateSettings(updated); } catch(e){} }} />;
       case 'receipt_layout':
-        return <ReceiptLayoutPage settings={settings} onUpdateSettings={async (updated) => { onUpdateSettings(updated); try { await api.updateSettings(updated); } catch(e){} }} ingredients={ingredients} recipeTemplates={recipeTemplates} onRefreshRecipeTemplates={onRefreshRecipeTemplates} />;
+        return <ReceiptLayoutPage settings={settings} onUpdateSettings={async (updated) => { onUpdateSettings(updated); try { await api.updateSettings(updated); } catch(e){} }} onGoToBranding={onSetSubTab ? () => onSetSubTab('branding') : undefined} ingredients={ingredients} recipeTemplates={recipeTemplates} onRefreshRecipeTemplates={onRefreshRecipeTemplates} />;
+      case 'branding':
+        return <BrandingPage settings={settings} onUpdateSettings={async (updated) => { onUpdateSettings(updated); try { await api.updateSettings(updated); } catch(e){} }} />;
       case 'hardware_printers':
         return <PrinterSettingsPage settings={settings} onUpdateSettings={async (updated) => { onUpdateSettings(updated); try { await api.updateSettings(updated); } catch(e){} }} />;
       case 'payment_gateways':
         return <PaymentGatewaysPage settings={settings} onUpdateSettings={async (updated) => { onUpdateSettings(updated); try { await api.updateSettings(updated); } catch(e){} }} />;
       case 'database_backup':
         return <BackupPage />;
+      case 'communications':
       case 'email_setup':
-        return <EmailSetupPage suppliers={suppliers || []} />;
+        return <CommunicationsSetupPage suppliers={suppliers || []} settings={settings} onUpdateSettings={async (updated) => { onUpdateSettings(updated); try { await api.updateSettings(updated); } catch(e){} }} />;
       default:
         return <TaxSettingsPage settings={settings} onUpdateSettings={async (updated) => { onUpdateSettings(updated); try { await api.updateSettings(updated); } catch(e){} }} />;
     }
@@ -97,7 +112,7 @@ export function SystemSettings({ settings, onUpdateSettings, activeSubTab, can, 
 
   return (
     <div className="space-y-6 animate-fadeIn">
-      <TitleBar info={info} />
+      {!hasOwnHeader && <TitleBar info={info} />}
       {renderPage()}
     </div>
   );

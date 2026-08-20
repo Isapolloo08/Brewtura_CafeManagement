@@ -40,39 +40,7 @@ export function KitchenDisplay({ orders, onUpdateOrderStatus, ingredients, produ
         </div>
       </div>
 
-      {/* Order Pipeline Progress */}
-      <div className="glass-card p-5 rounded-2xl border border-white/60">
-        <div className="flex items-center justify-between mb-2">
-          <span className="text-xs font-bold text-amber-900/60">Order Pipeline</span>
-          <span className="text-[10px] font-bold text-amber-900/40">{orders.length} total orders</span>
-        </div>
-        <div className="space-y-2">
-          {['New', 'Preparing', 'Ready', 'Served'].map(status => {
-            const count = orders.filter(o => o.status === status).length;
-            const pct = orders.length > 0 ? Math.round((count / orders.length) * 100) : 0;
-            if (count === 0) return null;
-            return (
-              <div key={status}>
-                <div className="flex justify-between text-[11px] font-semibold mb-0.5">
-                  <span className={status === 'New' ? 'text-amber-700' : status === 'Preparing' ? 'text-blue-700' : status === 'Ready' ? 'text-emerald-700' : 'text-zinc-500'}>{status}</span>
-                  <span className="text-amber-900/50">{count} ({pct}%)</span>
-                </div>
-                <div className="w-full h-2 rounded-full bg-amber-900/10 overflow-hidden">
-                  <div
-                    className={`h-full rounded-full animate-progress-in ${
-                      status === 'New' ? 'bg-gradient-to-r from-amber-500 to-yellow-600' :
-                      status === 'Preparing' ? 'bg-gradient-to-r from-blue-500 to-indigo-600' :
-                      status === 'Ready' ? 'bg-gradient-to-r from-emerald-500 to-green-600' :
-                      'bg-gradient-to-r from-zinc-400 to-zinc-500'
-                    }`}
-                    style={{ width: `${pct}%` }}
-                  />
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
+
 
       {/* Filter Tabs */}
       <div className="flex bg-amber-900/10 p-1.5 rounded-2xl max-w-xl">
@@ -80,11 +48,10 @@ export function KitchenDisplay({ orders, onUpdateOrderStatus, ingredients, produ
           <button
             key={st}
             onClick={() => setFilterStatus(st)}
-            className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all ${
-              filterStatus === st
+            className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all ${filterStatus === st
                 ? 'bg-[#3C2A21] text-amber-100 shadow-md'
                 : 'text-amber-900/70 hover:text-[#3C2A21]'
-            }`}
+              }`}
           >
             {st} ({orders.filter(o => st === 'All' || o.status === st).length})
           </button>
@@ -96,9 +63,8 @@ export function KitchenDisplay({ orders, onUpdateOrderStatus, ingredients, produ
         {filteredOrders.map((order) => (
           <div
             key={order.id}
-            className={`glass-card rounded-3xl border border-white/60 p-5 flex flex-col justify-between space-y-4 shadow-xl transition-transform hover:scale-[1.01] ${
-              order.status === 'New' ? 'ring-2 ring-amber-500/60 bg-amber-500/5' : ''
-            }`}
+            className={`glass-card rounded-3xl border border-white/60 p-5 flex flex-col justify-between space-y-4 shadow-xl transition-transform hover:scale-[1.01] ${order.status === 'New' ? 'ring-2 ring-amber-500/60 bg-amber-500/5' : ''
+              }`}
           >
             <div>
               {/* Header Header */}

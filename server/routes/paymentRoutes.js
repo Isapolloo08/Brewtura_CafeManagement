@@ -7,10 +7,10 @@ const router = express.Router();
 router.use(authenticateToken);
 
 // Payments
-router.post('/payments', recordPayment);
+router.post('/payments', authorizeRoles('admin', 'manager', 'cashier'), recordPayment);
 
 // Discounts
-router.get('/discounts', getDiscounts);
+router.get('/discounts', authorizeRoles('admin', 'manager', 'cashier'), getDiscounts);
 router.post('/discounts', authorizeRoles('admin', 'manager'), createDiscount);
 
 export default router;

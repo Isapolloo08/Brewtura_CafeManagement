@@ -23,14 +23,16 @@ import { LiveViewPage } from './components/LiveViewPage';
 import { ShiftLogPage } from './components/ShiftLogPage';
 import { NotificationsPage } from './components/NotificationsPage';
 import { ActivityHistoryPage } from './components/ActivityHistoryPage';
+import { ProfilePage } from './components/ProfilePage';
 import { CreateProductModal } from './components/CreateProductModal';
 import { SupplierScanAlert } from './components/SupplierScanAlert';
+import { TransactionsPage } from './components/TransactionsPage';
 
 
 
 import api from './services/api.js';
 import { socket } from './services/socket.js';
-import { can as roleCan } from './utils/permissions.js';
+import { can as roleCan, canAccessPage } from './utils/permissions.js';
 
 export function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(() => {
@@ -43,7 +45,7 @@ export function App() {
       name: 'Marco V.',
       role: 'Administrator',
       employeeId: 'ADM-001',
-      avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80'
+      avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=500&q=90'
     };
   });
 
@@ -69,7 +71,18 @@ export function App() {
   const [isNewProductModalOpen, setIsNewProductModalOpen] = useState(false);
   const [isMobileOpen, setIsMobileOpen] = useState(false);
 
+  const [authNotice, setAuthNotice] = useState(null);
+
   const [scanAlert, setScanAlert] = useState(null);
+
+  useEffect(() => {
+    const onAuthExpired = (e) => {
+      setAuthNotice(e.detail?.message || 'Your session has expired. Please log in again.');
+      setIsLoggedIn(false);
+    };
+    window.addEventListener('coffee:auth-expired', onAuthExpired);
+    return () => window.removeEventListener('coffee:auth-expired', onAuthExpired);
+  }, []);
 
   useEffect(() => {
     const onSupplierMessage = (message) => {
@@ -217,7 +230,7 @@ export function App() {
     const loadBackendData = async () => {
       setLoading(true);
       try {
-        const [ingRes, prodRes, catRes, movRes, suppRes, ordRes, empRes, settingsRes, vtRes, rtRes, poRes, tempRes, milkRes, addRes] = await Promise.allSettled([
+        const [ingRes, prodRes, catRes, movRes, suppRes, ordRes, empRes, settingsRes, vtRes, rtRes, poRes, tempRes, milkRes, addRes, meRes] = await Promise.allSettled([
           api.getIngredients(),
           api.getProducts(),
           api.getCategories(),
@@ -232,6 +245,7 @@ export function App() {
           api.getTemperatureOptions(),
           api.getMilkOptions(),
           api.getAddons(),
+          api.getMe(),
         ]);
 
         if (ingRes.status === 'fulfilled' && Array.isArray(ingRes.value)) {
@@ -267,6 +281,7 @@ export function App() {
             recipe: Array.isArray(p.recipe)
               ? p.recipe.map(r => ({
                   ingredientId: r.ingredient_id !== undefined && r.ingredient_id !== null ? String(r.ingredient_id) : undefined,
+                  customizationId: r.product_customization_id !== undefined && r.product_customization_id !== null ? String(r.product_customization_id) : null,
                   name: r.ingredient_name,
                   amount: parseFloat(r.qty_required),
                   unit: r.unit
@@ -298,15 +313,15 @@ export function App() {
         }
 
         if (tempRes.status === 'fulfilled' && Array.isArray(tempRes.value)) {
-          setTemperatures(tempRes.value.map(t => ({ id: String(t.id), name: t.name, priceDelta: parseFloat(t.price_delta) })));
+          setTemperatures(tempRes.value.map(t => ({ id: String(t.id), name: t.name, priceDelta: parseFloat(t.price_delta), stock: t.stock !== undefined ? parseInt(t.stock, 10) : 0 })));
         }
 
         if (milkRes.status === 'fulfilled' && Array.isArray(milkRes.value)) {
-          setMilks(milkRes.value.map(m => ({ id: String(m.id), name: m.name, priceDelta: parseFloat(m.price_delta) })));
+          setMilks(milkRes.value.map(m => ({ id: String(m.id), name: m.name, priceDelta: parseFloat(m.price_delta), stock: m.stock !== undefined ? parseInt(m.stock, 10) : 0 })));
         }
 
         if (addRes.status === 'fulfilled' && Array.isArray(addRes.value)) {
-          setAddons(addRes.value.map(a => ({ id: String(a.id), name: a.name, price: parseFloat(a.price) })));
+          setAddons(addRes.value.map(a => ({ id: String(a.id), name: a.name, price: parseFloat(a.price), stock: a.stock !== undefined ? parseInt(a.stock, 10) : 0 })));
         }
 
         if (rtRes.status === 'fulfilled' && Array.isArray(rtRes.value)) {
@@ -374,6 +389,22 @@ export function App() {
             role: u.role === 'admin' ? 'Administrator' : u.role === 'manager' ? 'Manager' : u.role === 'cashier' ? 'Cashier' : u.role === 'barista' ? 'Barista' : 'Inventory Staff',
             status: u.is_active ? 'Active' : 'Inactive'
           })));
+        }
+
+        if (meRes.status === 'fulfilled' && meRes.value && meRes.value.id) {
+          const me = meRes.value;
+          const dbUser = {
+            id: String(me.id),
+            name: me.name,
+            email: me.email || '',
+            employeeId: me.employee_id || '',
+            avatar: me.avatar || '',
+            role: me.role === 'admin' ? 'Administrator' : me.role === 'manager' ? 'Manager' : me.role === 'cashier' ? 'Cashier' : me.role === 'barista' ? 'Barista' : 'Inventory Staff'
+          };
+          setCurrentUser(dbUser);
+          try {
+            localStorage.setItem('currentUser', JSON.stringify(dbUser));
+          } catch (_) {}
         }
 
         if (settingsRes.status === 'fulfilled' && settingsRes.value) {
@@ -502,11 +533,22 @@ export function App() {
     try {
       const numericVal = parseFloat(newMov.quantity.replace(/[^0-9.]/g, ''));
       const isDeduction = newMov.quantity.startsWith('-');
-      const type = isDeduction ? 'stock_out' : 'stock_in';
+
+      // Map UI display labels to DB enum values
+      const typeMap = {
+        'Stock In': 'stock_in',
+        'Stock Out': 'stock_out',
+        'Spoilage': 'waste',
+        'Waste': 'waste',
+        'Manual Adjustment': 'adjustment',
+        'Adjustment': 'adjustment',
+      };
+      const dbType = typeMap[newMov.type] || (isDeduction ? 'stock_out' : 'stock_in');
 
       await api.recordStockMovement({
-        ingredient_id: newMov.ingredientId,
-        type: type,
+        ingredient_id: newMov.ingredientId || null,
+        customization_template_id: newMov.customizationTemplateId || null,
+        type: dbType,
         quantity: numericVal,
         note: newMov.reason
       });
@@ -521,20 +563,43 @@ export function App() {
     };
     setMovements([movObj, ...movements]);
 
-    setIngredients(prev => prev.map(ing => {
-      if (ing.id === newMov.ingredientId) {
-        const numericVal = parseFloat(newMov.quantity.replace(/[^0-9.]/g, ''));
-        const isDeduction = newMov.quantity.startsWith('-');
-        const updatedStock = isDeduction ? Math.max(0, ing.stock - numericVal) : ing.stock + numericVal;
+    if (newMov.customizationTemplateId) {
+      const numericVal = parseFloat(newMov.quantity.replace(/[^0-9.]/g, ''));
+      const isDeduction = newMov.quantity.startsWith('-');
+      const targetId = String(newMov.customizationTemplateId);
 
-        let newStatus = 'In Stock';
-        if (updatedStock === 0) newStatus = 'Out of Stock';
-        else if (updatedStock <= ing.minStock) newStatus = 'Low Stock';
+      const updateStockProp = (items) => items.map(item => {
+        if (item.id === targetId) {
+          const current = item.stock ?? 0;
+          const updated = isDeduction ? Math.max(0, current - numericVal) : current + numericVal;
+          return { ...item, stock: Math.round(updated) };
+        }
+        return item;
+      });
 
-        return { ...ing, stock: updatedStock, status: newStatus };
-      }
-      return ing;
-    }));
+      setCustomizationTemplates(prev => ({
+        sizes: updateStockProp(prev.sizes || []),
+        options: updateStockProp(prev.options || [])
+      }));
+      setTemperatures(prev => updateStockProp(prev));
+      setMilks(prev => updateStockProp(prev));
+      setAddons(prev => updateStockProp(prev));
+    } else if (newMov.ingredientId) {
+      setIngredients(prev => prev.map(ing => {
+        if (ing.id === newMov.ingredientId) {
+          const numericVal = parseFloat(newMov.quantity.replace(/[^0-9.]/g, ''));
+          const isDeduction = newMov.quantity.startsWith('-');
+          const updatedStock = isDeduction ? Math.max(0, ing.stock - numericVal) : ing.stock + numericVal;
+
+          let newStatus = 'In Stock';
+          if (updatedStock === 0) newStatus = 'Out of Stock';
+          else if (updatedStock <= ing.minStock) newStatus = 'Low Stock';
+
+          return { ...ing, stock: updatedStock, status: newStatus };
+        }
+        return ing;
+      }));
+    }
   };
 
   const handleCreatePurchaseOrder = async (newPo) => {
@@ -596,6 +661,14 @@ export function App() {
     setProducts([newProd, ...products]);
   };
 
+  const handleProfileUpdate = (updatedUser) => {
+    const merged = { ...currentUser, ...updatedUser };
+    setCurrentUser(merged);
+    try {
+      localStorage.setItem('currentUser', JSON.stringify(merged));
+    } catch (_) {}
+  };
+
   const splitCustomizationTemplates = (templates) => {
     const sizes = [];
     const options = [];
@@ -605,6 +678,7 @@ export function App() {
         type: t.customization_type,
         name: t.name,
         priceDelta: parseFloat(t.default_price_delta),
+        stock: t.stock !== undefined ? parseInt(t.stock, 10) : 0,
       };
       (t.customization_type === 'size' ? sizes : options).push(item);
     }
@@ -641,7 +715,7 @@ export function App() {
   const handleRefreshTemperatures = async () => {
     try {
       const data = await api.getTemperatureOptions();
-      setTemperatures((data || []).map(t => ({ id: String(t.id), name: t.name, priceDelta: parseFloat(t.price_delta) })));
+      setTemperatures((data || []).map(t => ({ id: String(t.id), name: t.name, priceDelta: parseFloat(t.price_delta), stock: t.stock !== undefined ? parseInt(t.stock, 10) : 0 })));
     } catch (err) {
       console.warn('Failed to refresh temperature options:', err);
     }
@@ -650,7 +724,7 @@ export function App() {
   const handleRefreshMilks = async () => {
     try {
       const data = await api.getMilkOptions();
-      setMilks((data || []).map(m => ({ id: String(m.id), name: m.name, priceDelta: parseFloat(m.price_delta) })));
+      setMilks((data || []).map(m => ({ id: String(m.id), name: m.name, priceDelta: parseFloat(m.price_delta), stock: m.stock !== undefined ? parseInt(m.stock, 10) : 0 })));
     } catch (err) {
       console.warn('Failed to refresh milk options:', err);
     }
@@ -659,23 +733,46 @@ export function App() {
   const handleRefreshAddons = async () => {
     try {
       const data = await api.getAddons();
-      setAddons((data || []).map(a => ({ id: String(a.id), name: a.name, price: parseFloat(a.price) })));
+      setAddons((data || []).map(a => ({ id: String(a.id), name: a.name, price: parseFloat(a.price), stock: a.stock !== undefined ? parseInt(a.stock, 10) : 0 })));
     } catch (err) {
       console.warn('Failed to refresh add-ons:', err);
     }
   };
 
-  const handleNavigate = (tab) => {
+  const handleNavigate = (tab, subTab) => {
     setActiveTab(tab);
-    setActiveSubTab('');
+    setActiveSubTab(subTab || '');
   };
 
   // Renders the correct page component based on tab/sub tab
   const renderPageContent = (tab, sub) => {
+    // Role-based page gate — the security boundary is the server's
+    // authorizeRoles, this just prevents rendering pages a role can't open.
+    if (!canAccessPage(currentUser?.role, tab, sub)) {
+      return (
+        <div className="glass-card p-10 rounded-3xl border border-white/60 text-center animate-fadeIn">
+          <span className="text-4xl block mb-3">🔒</span>
+          <h2 className="font-heading font-extrabold text-xl text-[#3C2A21] mb-1">Access Restricted</h2>
+          <p className="text-xs text-amber-900/60 font-medium mb-5">
+            Your role does not have permission to view this page. Contact an administrator if you believe this is a mistake.
+          </p>
+          <button
+            onClick={() => handleNavigate('dashboard')}
+            className="px-4 py-2 rounded-xl bg-gradient-to-r from-[#693F27] to-[#3C2A21] text-amber-100 text-xs font-bold shadow-md hover:brightness-110"
+          >
+            Back to Dashboard
+          </button>
+        </div>
+      );
+    }
+
     const can = (resource, action = 'add') => roleCan(currentUser?.role, resource, action);
     const currentReportPage = REPORTS_PAGES.find(p => p.id === sub);
 
-    const sharedReportContent = (pageContent) => (
+    /* Inventory valuation is a point-in-time snapshot — it ignores
+       filterPeriod entirely, so the switcher is hidden for that report
+       rather than left on screen as a no-op control. */
+    const sharedReportContent = (pageContent, { showPeriod = true } = {}) => (
       <div className="space-y-6">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 glass-card p-6 rounded-3xl border border-white/60">
           <div>
@@ -709,19 +806,21 @@ export function App() {
             <span>›</span>
             <span className="text-[#3C2A21] font-bold">{currentReportPage?.label}</span>
           </div>
-          <div className="flex items-center gap-1 glass-card rounded-xl border border-white/60 p-1">
-            {['Daily', 'Weekly', 'Monthly', 'Yearly'].map((p) => (
-              <button
-                key={p}
-                onClick={() => setFilterPeriod(p)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                  filterPeriod === p ? 'bg-[#3C2A21] text-amber-100 shadow-sm' : 'text-amber-900/55 hover:text-[#3C2A21]'
-                }`}
-              >
-                {p}
-              </button>
-            ))}
-          </div>
+          {showPeriod && (
+            <div className="flex items-center gap-1 glass-card rounded-xl border border-white/60 p-1">
+              {['Daily', 'Weekly', 'Monthly', 'Yearly'].map((p) => (
+                <button
+                  key={p}
+                  onClick={() => setFilterPeriod(p)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                    filterPeriod === p ? 'bg-[#3C2A21] text-amber-100 shadow-sm' : 'text-amber-900/55 hover:text-[#3C2A21]'
+                  }`}
+                >
+                  {p}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
         {pageContent}
       </div>
@@ -738,6 +837,10 @@ export function App() {
             onOpenNewProductModal={() => setIsNewProductModalOpen(true)}
           />
         );
+      case 'transactions':
+        return <TransactionsPage currency={settings.currency || 'PHP'} />;
+      case 'profile':
+        return <ProfilePage currentUser={currentUser} onProfileUpdate={handleProfileUpdate} />;
       case 'live_view':
         return <LiveViewPage orders={orders} />;
       case 'shift_log':
@@ -759,7 +862,7 @@ export function App() {
               />
             );
           case 'customizations':
-            return <CustomizationsPage products={products} ingredients={ingredients} customizationTemplates={customizationTemplates} temperatures={temperatures} milks={milks} addons={addons} can={can} onUpdateProduct={handleUpdateProduct} onRefreshCustomizationTemplates={handleRefreshCustomizationTemplates} onRefreshTemperatures={handleRefreshTemperatures} onRefreshMilks={handleRefreshMilks} onRefreshAddons={handleRefreshAddons} />;
+            return <CustomizationsPage products={products} ingredients={ingredients} customizationTemplates={customizationTemplates} temperatures={temperatures} milks={milks} addons={addons} can={can} onUpdateProduct={handleUpdateProduct} onRefreshCustomizationTemplates={handleRefreshCustomizationTemplates} onRefreshTemperatures={handleRefreshTemperatures} onRefreshMilks={handleRefreshMilks} onRefreshAddons={handleRefreshAddons} onAddStockMovement={handleAddStockMovement} />;
           case 'recipes':
             return <RecipesPage products={products} ingredients={ingredients} can={can} onUpdateProduct={handleUpdateProduct} />;
           default:
@@ -807,7 +910,7 @@ export function App() {
           case 'best_sellers':
             return sharedReportContent(<BestSellersPage />);
           case 'inventory':
-            return sharedReportContent(<InventoryValuationPage ingredients={ingredients} />);
+            return sharedReportContent(<InventoryValuationPage ingredients={ingredients} />, { showPeriod: false });
           case 'shift_reports':
             return sharedReportContent(<ShiftReconciliationPage />);
           default:
@@ -926,6 +1029,26 @@ export function App() {
     alert(`Exporting ${reportPage?.label || 'Report'} as ${format}...`);
   };
 
+  const authNoticeModal = authNotice && (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+      <div className="glass-card bg-[#FFFDF9] rounded-3xl border border-white/60 p-8 max-w-sm w-full text-center shadow-2xl">
+        <div className="w-14 h-14 mx-auto mb-4 rounded-full bg-amber-900/10 text-[#693F27] flex items-center justify-center">
+          <svg xmlns="http://www.w3.org/2000/svg" className="w-7 h-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+        </div>
+        <h3 className="font-heading font-extrabold text-xl text-[#3C2A21] mb-2">Session Expired</h3>
+        <p className="text-sm text-amber-900/70 font-medium mb-6">{authNotice}</p>
+        <button
+          onClick={() => setAuthNotice(null)}
+          className="w-full py-3 rounded-2xl bg-gradient-to-r from-[#693F27] to-[#3C2A21] text-amber-100 text-sm font-bold shadow-md hover:brightness-110 transition-all"
+        >
+          Go to Login
+        </button>
+      </div>
+    </div>
+  );
+
   // If not logged in → full-page login
   if (!isLoggedIn) {
     return (
@@ -947,6 +1070,7 @@ export function App() {
             setActiveSubTab('purchase_orders');
           }}
         />
+        {authNoticeModal}
       </>
     );
   }
@@ -1000,9 +1124,12 @@ export function App() {
               'Recipes': 'recipes',
               'Tax & VAT': 'tax_vat',
               'Receipt Layout': 'receipt_layout',
+              'Store Branding': 'branding',
               'Hardware Printers': 'hardware_printers',
               'Payment Gateways': 'payment_gateways',
-              'Email Setup': 'email_setup',
+              'Communications': 'communications',
+              'Communications Setup': 'communications',
+              'Email Setup': 'communications',
               'Database Backup': 'database_backup',
               'Branches': 'branches',
             };
@@ -1076,6 +1203,8 @@ export function App() {
           setActiveSubTab('purchase_orders');
         }}
       />
+
+      {authNoticeModal}
     </div>
   );
 }

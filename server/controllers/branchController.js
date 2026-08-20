@@ -3,7 +3,7 @@ import { query, getClient } from '../db/index.js';
 export const getBranches = async (req, res) => {
   try {
     const result = await query(
-      `SELECT b.id, b.name, b.address, b.is_active,
+      `SELECT b.id, b.name, b.address, b.is_active, b.is_main,
               COUNT(u.id) FILTER (WHERE u.is_active AND u.role <> 'admin')::int AS staff_count,
               (SELECT u2.name FROM users u2
                 WHERE u2.branch_id = b.id AND u2.is_active AND u2.role = 'manager'
@@ -30,7 +30,7 @@ export const getBranches = async (req, res) => {
 };
 
 export const createBranch = async (req, res) => {
-  const { name, address, manager_id, cashier_ids, inventory_ids } = req.body;
+  const { name, address, manager_id, cashier_ids, inventory_ids, is_main } = req.body;
 
   if (!name || !String(name).trim()) {
     return res.status(400).json({ error: 'Branch name is required' });
@@ -38,10 +38,15 @@ export const createBranch = async (req, res) => {
 
   try {
     const result = await query(
-      'INSERT INTO branches (name, address) VALUES ($1, $2) RETURNING id, name, address, is_active',
-      [String(name).trim(), address || null]
+      'INSERT INTO branches (name, address, is_main) VALUES ($1, $2, $3) RETURNING id, name, address, is_active, is_main',
+      [String(name).trim(), address || null, !!is_main]
     );
     const branchId = result.rows[0].id;
+
+    // Enforce a single main branch: clear the flag on every other branch
+    if (is_main) {
+      await query('UPDATE branches SET is_main = false WHERE is_main = true AND id <> $1', [branchId]);
+    }
 
     if (manager_id) {
       await query(
@@ -74,7 +79,7 @@ export const createBranch = async (req, res) => {
 
 export const updateBranch = async (req, res) => {
   const { id } = req.params;
-  const { name, address, is_active, manager_id, cashier_ids, inventory_ids } = req.body;
+  const { name, address, is_active, is_main, manager_id, cashier_ids, inventory_ids } = req.body;
 
   try {
     let updates = [];
@@ -84,15 +89,21 @@ export const updateBranch = async (req, res) => {
     if (name !== undefined) { updates.push(`name = $${idx++}`); params.push(String(name).trim()); }
     if (address !== undefined) { updates.push(`address = $${idx++}`); params.push(address); }
     if (is_active !== undefined) { updates.push(`is_active = $${idx++}`); params.push(is_active); }
+    if (is_main !== undefined) { updates.push(`is_main = $${idx++}`); params.push(is_main); }
 
     if (updates.length > 0) {
       params.push(id);
-      const sql = `UPDATE branches SET ${updates.join(', ')} WHERE id = $${idx} RETURNING id, name, address, is_active`;
+      const sql = `UPDATE branches SET ${updates.join(', ')} WHERE id = $${idx} RETURNING id, name, address, is_active, is_main`;
       const result = await query(sql, params);
 
       if (result.rows.length === 0) {
         return res.status(404).json({ error: 'Branch not found' });
       }
+    }
+
+    // Enforce a single main branch: clear the flag on every other branch
+    if (is_main === true) {
+      await query('UPDATE branches SET is_main = false WHERE is_main = true AND id <> $1', [id]);
     }
 
     if (manager_id !== undefined) {
@@ -126,7 +137,7 @@ export const updateBranch = async (req, res) => {
     }
 
     const updated = await query(
-      'SELECT id, name, address, is_active FROM branches WHERE id = $1',
+      'SELECT id, name, address, is_active, is_main FROM branches WHERE id = $1',
       [id]
     );
     res.json(updated.rows[0]);

@@ -45,8 +45,19 @@ CREATE TABLE IF NOT EXISTS branches (
   name            VARCHAR(100) NOT NULL,
   address         TEXT,
   is_active       BOOLEAN NOT NULL DEFAULT true,
+  is_main         BOOLEAN NOT NULL DEFAULT false,
   created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Migration for existing databases: add is_main column to branches
+DO $$ BEGIN
+  ALTER TABLE branches ADD COLUMN IF NOT EXISTS is_main BOOLEAN NOT NULL DEFAULT false;
+EXCEPTION WHEN duplicate_column THEN null; END $$;
+
+-- Ensure there is always a main branch: promote the oldest branch if none is marked main
+UPDATE branches SET is_main = true
+WHERE NOT EXISTS (SELECT 1 FROM branches WHERE is_main = true)
+  AND id = (SELECT id FROM branches ORDER BY id LIMIT 1);
 
 -- USERS
 CREATE TABLE IF NOT EXISTS users (
@@ -72,6 +83,15 @@ EXCEPTION WHEN duplicate_column THEN null; END $$;
 -- Migration for existing databases: add avatar column if missing
 DO $$ BEGIN
   ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar TEXT;
+EXCEPTION WHEN duplicate_column THEN null; END $$;
+
+-- Migration for existing databases: password reset token columns
+DO $$ BEGIN
+  ALTER TABLE users ADD COLUMN IF NOT EXISTS password_reset_token_hash VARCHAR(255);
+EXCEPTION WHEN duplicate_column THEN null; END $$;
+
+DO $$ BEGIN
+  ALTER TABLE users ADD COLUMN IF NOT EXISTS password_reset_expires_at TIMESTAMPTZ;
 EXCEPTION WHEN duplicate_column THEN null; END $$;
 
 -- ============================================================
@@ -156,9 +176,15 @@ CREATE TABLE IF NOT EXISTS customization_templates (
   name                  VARCHAR(100) NOT NULL UNIQUE,
   customization_type    VARCHAR(20) NOT NULL DEFAULT 'option',
   default_price_delta   NUMERIC(10,2) NOT NULL DEFAULT 0,
+  stock                 INTEGER NOT NULL DEFAULT 0,
   is_active             BOOLEAN NOT NULL DEFAULT true,
   created_at            TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Migration for existing databases: add stock column to customization_templates
+DO $$ BEGIN
+  ALTER TABLE customization_templates ADD COLUMN IF NOT EXISTS stock INTEGER NOT NULL DEFAULT 0;
+EXCEPTION WHEN duplicate_column THEN null; END $$;
 
 -- Migration: add customization_type to existing product_customizations and backfill from template library
 ALTER TABLE product_customizations
@@ -170,45 +196,8 @@ SET customization_type = COALESCE(
   pc.customization_type
 );
 
-CREATE TABLE IF NOT EXISTS addons (
-  id              SERIAL PRIMARY KEY,
-  name            VARCHAR(100) NOT NULL,
-  price           NUMERIC(10,2) NOT NULL DEFAULT 0,
-  is_active       BOOLEAN NOT NULL DEFAULT true
-);
-
-CREATE TABLE IF NOT EXISTS product_addons (
-  product_id      INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
-  addon_id        INTEGER NOT NULL REFERENCES addons(id) ON DELETE CASCADE,
-  PRIMARY KEY (product_id, addon_id)
-);
-
--- PRODUCT TEMPERATURE & MILK OPTIONS (customer-facing product detail selectors)
-CREATE TABLE IF NOT EXISTS temperature_options (
-  id              SERIAL PRIMARY KEY,
-  name            VARCHAR(50) NOT NULL UNIQUE,
-  price_delta     NUMERIC(10,2) NOT NULL DEFAULT 0,
-  is_active       BOOLEAN NOT NULL DEFAULT true
-);
-
-CREATE TABLE IF NOT EXISTS milk_options (
-  id              SERIAL PRIMARY KEY,
-  name            VARCHAR(50) NOT NULL UNIQUE,
-  price_delta     NUMERIC(10,2) NOT NULL DEFAULT 0,
-  is_active       BOOLEAN NOT NULL DEFAULT true
-);
-
-CREATE TABLE IF NOT EXISTS product_temperatures (
-  product_id      INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
-  temperature_id  INTEGER NOT NULL REFERENCES temperature_options(id) ON DELETE CASCADE,
-  PRIMARY KEY (product_id, temperature_id)
-);
-
-CREATE TABLE IF NOT EXISTS product_milks (
-  product_id      INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
-  milk_id         INTEGER NOT NULL REFERENCES milk_options(id) ON DELETE CASCADE,
-  PRIMARY KEY (product_id, milk_id)
-);
+-- NOTE: add-on / temperature / milk options are consolidated into
+-- customization_templates (customization_type = 'addon' / 'temperature' / 'milk').
 
 -- INVENTORY: INGREDIENTS / RECIPES / STOCK MOVEMENTS
 CREATE TABLE IF NOT EXISTS ingredients (
@@ -249,7 +238,7 @@ CREATE TABLE IF NOT EXISTS recipe_template_items (
 
 CREATE TABLE IF NOT EXISTS addon_recipes (
   id              SERIAL PRIMARY KEY,
-  addon_id        INTEGER NOT NULL REFERENCES addons(id) ON DELETE CASCADE,
+  addon_id        INTEGER NOT NULL REFERENCES customization_templates(id) ON DELETE CASCADE,
   ingredient_id   INTEGER NOT NULL REFERENCES ingredients(id),
   qty_required    NUMERIC(10,3) NOT NULL,
   UNIQUE (addon_id, ingredient_id)
@@ -297,12 +286,18 @@ CREATE TABLE IF NOT EXISTS orders (
   payment_status       payment_status NOT NULL DEFAULT 'unpaid',
   subtotal             NUMERIC(10,2) NOT NULL DEFAULT 0,
   discount_total       NUMERIC(10,2) NOT NULL DEFAULT 0,
+  service_charge_total NUMERIC(10,2) NOT NULL DEFAULT 0,
   tax_total            NUMERIC(10,2) NOT NULL DEFAULT 0,
   total                NUMERIC(10,2) NOT NULL DEFAULT 0,
   notes                TEXT,
   created_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at           TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Migration for existing databases: add service_charge_total column to orders
+DO $$ BEGIN
+  ALTER TABLE orders ADD COLUMN IF NOT EXISTS service_charge_total NUMERIC(10,2) NOT NULL DEFAULT 0;
+EXCEPTION WHEN duplicate_column THEN null; END $$;
 
 CREATE TABLE IF NOT EXISTS order_items (
   id              SERIAL PRIMARY KEY,
@@ -318,20 +313,30 @@ CREATE TABLE IF NOT EXISTS order_items (
 CREATE TABLE IF NOT EXISTS order_item_addons (
   id              SERIAL PRIMARY KEY,
   order_item_id   INTEGER NOT NULL REFERENCES order_items(id) ON DELETE CASCADE,
-  addon_id        INTEGER NOT NULL REFERENCES addons(id),
+  addon_id        INTEGER NOT NULL REFERENCES customization_templates(id),
   unit_price      NUMERIC(10,2) NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS stock_movements (
-  id                  SERIAL PRIMARY KEY,
-  ingredient_id       INTEGER NOT NULL REFERENCES ingredients(id),
-  type                stock_movement_type NOT NULL,
-  quantity            NUMERIC(12,2) NOT NULL,
-  reference_order_id  INTEGER REFERENCES orders(id),
-  note                TEXT,
-  created_by          INTEGER REFERENCES users(id),
-  created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
+  id                          SERIAL PRIMARY KEY,
+  ingredient_id               INTEGER REFERENCES ingredients(id),
+  customization_template_id   INTEGER REFERENCES customization_templates(id),
+  type                        stock_movement_type NOT NULL,
+  quantity                    NUMERIC(12,2) NOT NULL,
+  reference_order_id          INTEGER REFERENCES orders(id),
+  note                        TEXT,
+  created_by                  INTEGER REFERENCES users(id),
+  created_at                  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Migration for existing databases: make ingredient_id nullable and add customization_template_id
+DO $$ BEGIN
+  ALTER TABLE stock_movements ALTER COLUMN ingredient_id DROP NOT NULL;
+EXCEPTION WHEN OTHERS THEN null; END $$;
+
+DO $$ BEGIN
+  ALTER TABLE stock_movements ADD COLUMN IF NOT EXISTS customization_template_id INTEGER REFERENCES customization_templates(id);
+EXCEPTION WHEN duplicate_column THEN null; END $$;
 
 CREATE TABLE IF NOT EXISTS order_status_history (
   id              SERIAL PRIMARY KEY,
@@ -397,6 +402,34 @@ CREATE TABLE IF NOT EXISTS cash_movements (
   reason          VARCHAR(150),
   created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+CREATE TABLE IF NOT EXISTS shift_reports (
+  id                  SERIAL PRIMARY KEY,
+  shift_id            INTEGER NOT NULL UNIQUE REFERENCES shifts(id) ON DELETE CASCADE,
+  user_id             INTEGER NOT NULL REFERENCES users(id),
+  user_name           VARCHAR(120),
+  branch_id           INTEGER REFERENCES branches(id),
+  branch_name         VARCHAR(120),
+  opened_at           TIMESTAMPTZ NOT NULL,
+  closed_at           TIMESTAMPTZ NOT NULL,
+  cash_drawer_start   DOUBLE PRECISION NOT NULL DEFAULT 0,
+  cash_drawer_end     DOUBLE PRECISION NOT NULL DEFAULT 0,
+  transaction_count   INTEGER NOT NULL DEFAULT 0,
+  total_sales         DOUBLE PRECISION NOT NULL DEFAULT 0,
+  cash_sales          DOUBLE PRECISION NOT NULL DEFAULT 0,
+  digital_sales       DOUBLE PRECISION NOT NULL DEFAULT 0,
+  variance            DOUBLE PRECISION NOT NULL DEFAULT 0,
+  created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_shift_reports_closed_at ON shift_reports (closed_at);
+CREATE INDEX IF NOT EXISTS idx_shift_reports_branch_id ON shift_reports (branch_id);
+CREATE INDEX IF NOT EXISTS idx_shift_reports_user_id ON shift_reports (user_id);
+
+-- Migration: allow deleting users that have historical references (shifts / shift reports)
+DO $$ BEGIN
+  ALTER TABLE shifts ALTER COLUMN user_id DROP NOT NULL;
+  ALTER TABLE shift_reports ALTER COLUMN user_id DROP NOT NULL;
+EXCEPTION WHEN OTHERS THEN null; END $$;
 
 -- SYSTEM SETTINGS
 CREATE TABLE IF NOT EXISTS settings (

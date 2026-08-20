@@ -4,10 +4,12 @@ import { SearchableSelect } from './SearchableSelect';
 import { CustomizationPicker } from './CustomizationPicker';
 import { AddonPicker } from './AddonPicker';
 import { ModalPortal } from './ModalPortal';
+import { IngredientPickerModal } from './IngredientPickerModal';
 import api from '../services/api.js';
 
 export function EditProductModal({ isOpen, onClose, product, categories, ingredients, onUpdateProduct, customizationTemplates, temperatures, milks, addons }) {
   const [activeTab, setActiveTab] = useState('general');
+  const [error, setError] = useState('');
   const [name, setName] = useState(product?.name || '');
   const [category, setCategory] = useState(product?.category || categories[0]?.name || 'Coffee');
   const [price, setPrice] = useState(product?.price || 0);
@@ -15,16 +17,22 @@ export function EditProductModal({ isOpen, onClose, product, categories, ingredi
   const [image, setImage] = useState(product?.image || '');
   const [sizes, setSizes] = useState(() => {
     const sizeNames = new Set((customizationTemplates?.sizes || []).map(s => s.name));
-    return (product?.customizations || []).filter(v => sizeNames.has(v.name)).map(v => ({ ...v }));
+    return (product?.customizations || [])
+      .filter(v => v.customization_type === 'size' || (!v.customization_type && sizeNames.has(v.name)))
+      .map(v => ({ ...v }));
   });
   const [otherCustomizations, setOtherCustomizations] = useState(() => {
     const sizeNames = new Set((customizationTemplates?.sizes || []).map(s => s.name));
-    return (product?.customizations || []).filter(v => !sizeNames.has(v.name)).map(v => ({ ...v }));
+    return (product?.customizations || [])
+      .filter(v => !['size', 'temperature', 'milk', 'addon'].includes(v.customization_type))
+      .filter(v => !sizeNames.has(v.name))
+      .map(v => ({ ...v }));
   });
   const [tempOptions, setTempOptions] = useState(() => (product?.temperatures || []).map(t => ({ name: t.name, priceDelta: t.priceDelta })));
   const [milkOptions, setMilkOptions] = useState(() => (product?.milks || []).map(m => ({ name: m.name, priceDelta: m.priceDelta })));
   const [addonItems, setAddonItems] = useState(() => (product?.addons || []).map(a => ({ id: a.id, name: a.name, price: a.price })));
-  const [recipeItems, setRecipeItems] = useState(product?.recipe?.map(r => ({ ...r })) || []);
+  const [recipeItems, setRecipeItems] = useState((product?.recipe || []).filter(r => !r.customizationId).map(r => ({ ...r })));
+  const [showIngredientPicker, setShowIngredientPicker] = useState(false);
   const ingredientOptions = ingredients.map(ing => ({
     value: ing.id,
     label: `${ing.name} (${ing.unit})`,
@@ -32,10 +40,8 @@ export function EditProductModal({ isOpen, onClose, product, categories, ingredi
 
   if (!isOpen || !product) return null;
 
-  const handleAddRecipeRow = () => {
-    if (ingredients.length === 0) return;
-    const ing = ingredients[0];
-    setRecipeItems([...recipeItems, { ingredientId: ing.id, name: ing.name, amount: 0.1, unit: ing.unit }]);
+  const handleAddIngredients = (newItems) => {
+    setRecipeItems([...recipeItems, ...newItems]);
   };
 
   const handleRecipeChange = (idx, field, val) => {
@@ -57,8 +63,6 @@ export function EditProductModal({ isOpen, onClose, product, categories, ingredi
     setRecipeItems(prev => prev.filter((_, i) => i !== idx));
   };
 
-  const [error, setError] = useState('');
-
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
@@ -76,7 +80,13 @@ export function EditProductModal({ isOpen, onClose, product, categories, ingredi
       return;
     }
 
-    const mergedCustomizations = [...sizes, ...otherCustomizations].filter(v => v.name.trim());
+    const mergedCustomizations = [
+      ...sizes.map(v => ({ ...v, customization_type: v.customization_type || 'size' })),
+      ...otherCustomizations.map(v => ({ ...v, customization_type: v.customization_type || 'option' })),
+      ...tempOptions.map(t => ({ name: t.name, customization_type: 'temperature', priceDelta: t.priceDelta })),
+      ...milkOptions.map(m => ({ name: m.name, customization_type: 'milk', priceDelta: m.priceDelta })),
+      ...addonItems.map(a => ({ name: a.name, customization_type: 'addon', priceDelta: a.price })),
+    ].filter(v => v.name.trim());
     const updated = {
       ...product,
       name,
@@ -88,15 +98,7 @@ export function EditProductModal({ isOpen, onClose, product, categories, ingredi
       temperatures: tempOptions,
       milks: milkOptions,
       addons: addonItems,
-      temperature_ids: tempOptions
-        .map(t => temperatures.find(x => x.name === t.name)?.id)
-        .filter(Boolean)
-        .map(Number),
-      milk_ids: milkOptions
-        .map(m => milks.find(x => x.name === m.name)?.id)
-        .filter(Boolean)
-        .map(Number),
-      recipe: recipeItems,
+      recipe: recipeItems.filter(r => !r.customizationId),
     };
     try {
       const catObj = categories.find(c => c.name === category);
@@ -112,12 +114,18 @@ export function EditProductModal({ isOpen, onClose, product, categories, ingredi
           price_delta: parseFloat(v.priceDelta) || 0,
           is_default: v.is_default || false,
         })),
-        temperature_ids: updated.temperature_ids,
-        milk_ids: updated.milk_ids,
-        addons: addonItems.map(a => Number(a.id)),
       });
     } catch (err) {
       console.warn('API error updating product, keeping local state:', err);
+    }
+
+    const baseRecipeItems = recipeItems
+      .filter(r => !r.customizationId && r.ingredientId)
+      .map(r => ({ ingredient_id: parseInt(r.ingredientId, 10), qty_required: r.amount }));
+    try {
+      await api.updateProductRecipe(product.id, baseRecipeItems);
+    } catch (err) {
+      console.warn('API error updating recipe, keeping local state:', err);
     }
     onUpdateProduct(updated);
     onClose();
@@ -318,10 +326,10 @@ export function EditProductModal({ isOpen, onClose, product, categories, ingredi
                   </h4>
                   <button
                     type="button"
-                    onClick={handleAddRecipeRow}
+                    onClick={() => setShowIngredientPicker(true)}
                     className="text-xs font-bold text-[#C08552] hover:underline"
                   >
-                    + Add Ingredient
+                    + Select Ingredients
                   </button>
                 </div>
 
@@ -357,7 +365,7 @@ export function EditProductModal({ isOpen, onClose, product, categories, ingredi
                     </div>
                   ))}
                   {recipeItems.length === 0 && (
-                    <p className="text-xs text-amber-900/40 font-medium text-center py-4">No ingredients yet. Click "+ Add Ingredient" to build the recipe.</p>
+                    <p className="text-xs text-amber-900/40 font-medium text-center py-4">No ingredients yet. Click "+ Select Ingredients" to add.</p>
                   )}
                 </div>
               </div>
@@ -387,6 +395,14 @@ export function EditProductModal({ isOpen, onClose, product, categories, ingredi
             </div>
           </form>
         </div>
+        {showIngredientPicker && (
+          <IngredientPickerModal
+            onClose={() => setShowIngredientPicker(false)}
+            ingredients={ingredients}
+            existingItems={recipeItems}
+            onAdd={handleAddIngredients}
+          />
+        )}
       </div>
     </ModalPortal>
   );

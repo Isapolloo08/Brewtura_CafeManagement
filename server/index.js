@@ -10,12 +10,14 @@ import menuRoutes from './routes/menuRoutes.js';
 import inventoryRoutes from './routes/inventoryRoutes.js';
 import purchaseOrderRoutes from './routes/purchaseOrderRoutes.js';
 import gmailRoutes from './routes/gmailRoutes.js';
+import smsRoutes from './routes/smsRoutes.js';
 import orderRoutes from './routes/orderRoutes.js';
 import paymentRoutes from './routes/paymentRoutes.js';
 import shiftRoutes from './routes/shiftRoutes.js';
 import reportRoutes from './routes/reportRoutes.js';
 import { attachSocket } from './services/socketService.js';
 import { startAutoPolling } from './services/gmailService.js';
+import { startSmsPolling } from './services/smsService.js';
 
 dotenv.config();
 
@@ -39,6 +41,7 @@ app.use('/api/v1/menu', menuRoutes);
 app.use('/api/v1/inventory', inventoryRoutes);
 app.use('/api/v1/purchase-orders', purchaseOrderRoutes);
 app.use('/api/v1/gmail', gmailRoutes);
+app.use('/api/v1/sms', smsRoutes);
 app.use('/api/v1/orders', orderRoutes);
 app.use('/api/v1/payments', paymentRoutes);
 app.use('/api/v1/shifts', shiftRoutes);
@@ -64,4 +67,5 @@ httpServer.listen(PORT, () => {
   console.log(`☕ Coffee Shop REST API Server running on port ${PORT}`);
   console.log(`⚡ WebSocket (Socket.IO) server listening on port ${PORT}`);
   startAutoPolling();
+  startSmsPolling();
 });

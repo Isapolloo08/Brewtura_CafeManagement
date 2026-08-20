@@ -86,3 +86,47 @@ export const allowedActions = (role, resource) => {
   const allowed = MATRIX[r] && MATRIX[r][resource];
   return Array.isArray(allowed) ? [...allowed] : [];
 };
+
+// ─── Page-level access control ───
+// Which top-level pages each (normalized display) role may open. Administrator
+// always passes; sub-pages are gated separately via SETTINGS_SUB_ACCESS.
+const PAGE_ACCESS = {
+  dashboard: ['Administrator', 'Manager', 'Cashier', 'Barista', 'Inventory Staff'],
+  menu: ['Administrator', 'Manager'],
+  inventory: ['Administrator', 'Manager', 'Inventory Staff'],
+  kitchen: ['Administrator', 'Manager', 'Cashier', 'Barista'],
+  transactions: ['Administrator', 'Manager', 'Cashier'],
+  reports: ['Administrator', 'Manager'],
+  users: ['Administrator', 'Manager'],
+  settings: ['Administrator', 'Manager'],
+  profile: ['Administrator', 'Manager', 'Cashier', 'Barista', 'Inventory Staff'],
+  live_view: ['Administrator', 'Manager', 'Cashier', 'Barista'],
+  shift_log: ['Administrator', 'Manager', 'Cashier'],
+  notifications: ['Administrator', 'Manager', 'Cashier', 'Barista', 'Inventory Staff'],
+  activity_history: ['Administrator', 'Manager'],
+};
+
+const SETTINGS_SUB_ACCESS = {
+  branches: ['Administrator', 'Manager'],
+  tax_vat: ['Administrator'],
+  receipt_layout: ['Administrator'],
+  branding: ['Administrator'],
+  hardware_printers: ['Administrator'],
+  payment_gateways: ['Administrator'],
+  communications: ['Administrator', 'Manager'],
+  email_setup: ['Administrator', 'Manager'],
+  database_backup: ['Administrator'],
+};
+
+export const canAccessPage = (role, tab, sub) => {
+  const r = normalizeRole(role);
+  if (r === 'Administrator') return true;
+  if (tab === 'settings') {
+    // Require an explicit sub-page; with none chosen the default sub is
+    // admin-only, so deny to avoid leaking it.
+    if (!sub) return false;
+    return (SETTINGS_SUB_ACCESS[sub] || []).includes(r);
+  }
+  const allowed = PAGE_ACCESS[tab];
+  return Array.isArray(allowed) && allowed.includes(r);
+};

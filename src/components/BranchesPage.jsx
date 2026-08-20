@@ -114,6 +114,7 @@ export function BranchesPage({ can }) {
   const [editingBranch, setEditingBranch] = useState(null);
   const [formName, setFormName] = useState('');
   const [formAddress, setFormAddress] = useState('');
+  const [formIsMain, setFormIsMain] = useState(false);
   const [formManagerId, setFormManagerId] = useState('');
   const [formCashierIds, setFormCashierIds] = useState([]);
   const [formInventoryIds, setFormInventoryIds] = useState([]);
@@ -123,6 +124,7 @@ export function BranchesPage({ can }) {
 
   const [deletingBranch, setDeletingBranch] = useState(null);
   const [hardDeletingBranch, setHardDeletingBranch] = useState(null);
+  const [mainConfirm, setMainConfirm] = useState(null);
   const [msg, setMsg] = useState({ text: '', type: '' });
 
   const loadBranches = async () => {
@@ -166,6 +168,7 @@ export function BranchesPage({ can }) {
     setEditingBranch(null);
     setFormName('');
     setFormAddress('');
+    setFormIsMain(!branches.some((b) => b.is_main));
     setFormManagerId('');
     setFormCashierIds([]);
     setFormInventoryIds([]);
@@ -176,6 +179,7 @@ export function BranchesPage({ can }) {
     setEditingBranch(branch);
     setFormName(branch.name || '');
     setFormAddress(branch.address || '');
+    setFormIsMain(!!branch.is_main);
     const inCharge = staff.find((u) => u.name === branch.manager_name);
     setFormManagerId(inCharge ? String(inCharge.id) : '');
     setFormCashierIds(
@@ -193,13 +197,12 @@ export function BranchesPage({ can }) {
     setModalOpen(true);
   };
 
-  const handleSave = async (e) => {
-    e.preventDefault();
-    if (!formName.trim()) return;
+  const performSave = async () => {
     setSaving(true);
     const payload = {
       name: formName.trim(),
       address: formAddress,
+      is_main: formIsMain,
       manager_id: formManagerId ? Number(formManagerId) : null,
       cashier_ids: formCashierIds.map(Number),
       inventory_ids: formInventoryIds.map(Number),
@@ -219,6 +222,22 @@ export function BranchesPage({ can }) {
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleSave = (e) => {
+    e.preventDefault();
+    if (!formName.trim()) return;
+    const currentMain = branches.find((b) => b.is_main);
+    const transferringMain = editingBranch && formIsMain && !editingBranch.is_main && currentMain;
+    if (transferringMain) {
+      setMainConfirm({
+        currentMainName: currentMain.name,
+        branchName: formName.trim(),
+        onConfirm: performSave,
+      });
+      return;
+    }
+    performSave();
   };
 
   const handleDelete = async () => {
@@ -309,11 +328,18 @@ export function BranchesPage({ can }) {
                   <h4 className="font-heading font-extrabold text-sm text-[#3C2A21] truncate">{branch.name}</h4>
                   <p className="text-[11px] text-amber-900/50 font-medium truncate">{branch.address || 'No address'}</p>
                 </div>
-                <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold whitespace-nowrap ml-2 ${
-                  branch.is_active ? 'bg-emerald-500/10 text-emerald-800' : 'bg-red-500/10 text-red-700'
-                }`}>
-                  {branch.is_active ? 'Active' : 'Inactive'}
-                </span>
+                <div className="flex flex-col items-end gap-1.5 shrink-0 ml-2">
+                  {branch.is_main && (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-gradient-to-r from-[#693F27] to-[#3C2A21] text-amber-100 text-[10px] font-extrabold whitespace-nowrap shadow-sm">
+                      <Icons.Star className="w-3 h-3" /> Main
+                    </span>
+                  )}
+                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold whitespace-nowrap ${
+                    branch.is_active ? 'bg-emerald-500/10 text-emerald-800' : 'bg-red-500/10 text-red-700'
+                  }`}>
+                    {branch.is_active ? 'Active' : 'Inactive'}
+                  </span>
+                </div>
               </div>
 
               <div className="mt-3 pt-3 border-t border-amber-900/10 space-y-1.5 text-[11px] font-semibold">
@@ -429,6 +455,29 @@ export function BranchesPage({ can }) {
                       </div>
                     </>
                   )}
+                  {(editingBranch ? true : !branches.some((b) => b.is_main)) && (
+                    <div className="p-3 rounded-xl bg-[#C08552]/10 border border-[#C08552]/20">
+                      <label className="flex items-start gap-2.5 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={formIsMain}
+                          onChange={(e) => setFormIsMain(e.target.checked)}
+                          disabled={editingBranch && editingBranch.is_main}
+                          className="mt-0.5 rounded-md text-[#C08552] focus:ring-[#C08552] focus:ring-offset-0 w-4 h-4 border-[#C08552]/40"
+                        />
+                        <div>
+                          <span className="font-extrabold text-xs text-[#3C2A21]">Set as Main Branch</span>
+                          <p className="text-[10px] text-[#3C2A21]/50 font-medium mt-0.5">
+                            {editingBranch && editingBranch.is_main
+                              ? 'This is currently the main branch.'
+                              : editingBranch
+                                ? 'The current main branch will be replaced by this branch.'
+                                : 'No main branch exists yet. This branch will become the main branch.'}
+                          </p>
+                        </div>
+                      </label>
+                    </div>
+                  )}
                 <div>
                   <label className="block text-xs font-bold text-[#4A2E2A] mb-1">Person In Charge (Manager)</label>
                   <MultiSelectDropdown
@@ -500,6 +549,17 @@ export function BranchesPage({ can }) {
         title="Permanently Delete Branch"
         message={`This will PERMANENTLY delete "${hardDeletingBranch?.name || 'this branch'}" and ALL of its historical records — orders, shifts, cash movements, and payments. This CANNOT be undone. Continue?`}
         confirmLabel="Delete Forever"
+        cancelLabel="Cancel"
+        variant="danger"
+      />
+
+      <ConfirmModal
+        isOpen={!!mainConfirm}
+        onClose={() => setMainConfirm(null)}
+        onConfirm={() => mainConfirm?.onConfirm()}
+        title="Change Main Branch"
+        message={`"${mainConfirm?.branchName}" will become the main branch. The main status will be removed from "${mainConfirm?.currentMainName}" and transferred to this branch. Continue?`}
+        confirmLabel="Yes, Set as Main"
         cancelLabel="Cancel"
         variant="danger"
       />

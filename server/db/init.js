@@ -24,7 +24,7 @@ async function initDB() {
     let branchId;
     if (branchRes.rowCount === 0) {
       const newBranch = await client.query(
-        "INSERT INTO branches (name, address) VALUES ($1, $2) RETURNING id",
+        "INSERT INTO branches (name, address, is_main) VALUES ($1, $2, true) RETURNING id",
         ['Main Branch', '123 Coffee St. Central City']
       );
       branchId = newBranch.rows[0].id;
@@ -89,60 +89,27 @@ async function initDB() {
         ('Medium (16oz)', 'size', 0.60),
         ('Large (20oz)', 'size', 1.20),
         ('16oz Iced', 'size', 0.50),
-        ('Hot', 'option', 0),
-        ('Iced', 'option', 0),
+        ('Hot', 'temperature', 0),
+        ('Iced', 'temperature', 0),
+        ('Room Temp', 'temperature', 0),
+        ('Extra Hot', 'temperature', 0),
+        ('Whole Milk', 'milk', 0),
+        ('Oat Milk', 'milk', 0.75),
+        ('Almond Milk', 'milk', 0.75),
+        ('Soy Milk', 'milk', 0.75),
+        ('Skim Milk', 'milk', 0),
+        ('Extra Espresso Shot', 'addon', 0.75),
+        ('Caramel Drizzle', 'addon', 0.40),
+        ('Chocolate Drizzle', 'addon', 0.40),
+        ('Whipped Cream', 'addon', 0.60),
+        ('Hazelnut Syrup', 'addon', 0.50),
+        ('Vanilla Syrup', 'addon', 0.50),
         ('Single Shot', 'option', 0),
         ('Double Shot', 'option', 0.75),
         ('Decaf', 'option', 0),
-        ('Extra Shot', 'option', 1.00),
-        ('Oat Milk', 'option', 0.75),
-        ('Almond Milk', 'option', 0.75),
-        ('Whipped Cream', 'option', 0.60),
-        ('Vanilla Syrup', 'option', 0.50)
+        ('Extra Shot', 'option', 1.00)
       `);
       console.log('🌱 Seeded default customization templates.');
-    }
-
-    // Seed default temperature options if empty
-    const temperatureRes = await client.query('SELECT id FROM temperature_options LIMIT 1');
-    if (temperatureRes.rowCount === 0) {
-      await client.query(`
-        INSERT INTO temperature_options (name, price_delta) VALUES
-        ('Hot', 0),
-        ('Iced', 0),
-        ('Room Temp', 0),
-        ('Extra Hot', 0)
-      `);
-      console.log('🌱 Seeded default temperature options.');
-    }
-
-    // Seed default milk options if empty
-    const milkRes = await client.query('SELECT id FROM milk_options LIMIT 1');
-    if (milkRes.rowCount === 0) {
-      await client.query(`
-        INSERT INTO milk_options (name, price_delta) VALUES
-        ('Whole Milk', 0),
-        ('Oat Milk', 0.75),
-        ('Almond Milk', 0.75),
-        ('Soy Milk', 0.75),
-        ('Skim Milk', 0)
-      `);
-      console.log('🌱 Seeded default milk options.');
-    }
-
-    // Seed default add-ons if empty
-    const addonRes = await client.query('SELECT id FROM addons LIMIT 1');
-    if (addonRes.rowCount === 0) {
-      await client.query(`
-        INSERT INTO addons (name, price) VALUES
-        ('Extra Espresso Shot', 0.75),
-        ('Caramel Drizzle', 0.40),
-        ('Chocolate Drizzle', 0.40),
-        ('Whipped Cream', 0.60),
-        ('Hazelnut Syrup', 0.50),
-        ('Vanilla Syrup', 0.50)
-      `);
-      console.log('🌱 Seeded default add-ons.');
     }
 
   } catch (err) {

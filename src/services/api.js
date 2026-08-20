@@ -1,5 +1,14 @@
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api/v1';
 
+// Clears the stored session and tells the app to go back to the login screen
+// when the server rejects our token (expired, invalid, or revoked).
+function handleAuthExpired(message) {
+  localStorage.removeItem('coffee_token');
+  localStorage.removeItem('currentUser');
+  localStorage.removeItem('isLoggedIn');
+  window.dispatchEvent(new CustomEvent('coffee:auth-expired', { detail: { message } }));
+}
+
 // Helper for HTTP requests with optional Auth Header
 async function fetchAPI(endpoint, options = {}) {
   const token = localStorage.getItem('coffee_token');
@@ -18,6 +27,14 @@ async function fetchAPI(endpoint, options = {}) {
   const data = await response.json().catch(() => ({}));
 
   if (!response.ok) {
+    const isAuthEndpoint = endpoint.startsWith('/auth/login') || endpoint.startsWith('/auth/pin-login');
+    if (token && !isAuthEndpoint) {
+      if (response.status === 403) {
+        handleAuthExpired('Your session has expired. Please log in again to continue.');
+      } else if (response.status === 401) {
+        handleAuthExpired();
+      }
+    }
     const error = new Error(data.error || `HTTP error! status: ${response.status}`);
     error.status = response.status;
     error.data = data;
@@ -31,7 +48,10 @@ export const api = {
   // Auth
   login: (credentials) => fetchAPI('/auth/login', { method: 'POST', body: JSON.stringify(credentials) }),
   pinLogin: (pinData) => fetchAPI('/auth/pin-login', { method: 'POST', body: JSON.stringify(pinData) }),
+  forgotPassword: (data) => fetchAPI('/auth/forgot-password', { method: 'POST', body: JSON.stringify(data) }),
+  resetPassword: (data) => fetchAPI('/auth/reset-password', { method: 'POST', body: JSON.stringify(data) }),
   getMe: () => fetchAPI('/auth/me'),
+  updateMe: (data) => fetchAPI('/auth/me', { method: 'PUT', body: JSON.stringify(data) }),
 
   // Users
   getUsers: () => fetchAPI('/users'),
@@ -101,6 +121,13 @@ export const api = {
   sendGmailEmail: (data) => fetchAPI('/gmail/send', { method: 'POST', body: JSON.stringify(data) }),
   disconnectGmail: () => fetchAPI('/gmail/disconnect', { method: 'POST' }),
 
+  // SMS & SIM Bridge Integration
+  getSmsStatus: () => fetchAPI('/sms/status'),
+  getSmsStats: () => fetchAPI('/sms/stats'),
+  pollSms: () => fetchAPI('/sms/poll', { method: 'POST' }),
+  getSmsMessages: () => fetchAPI('/sms/messages'),
+  sendSms: (data) => fetchAPI('/sms/send', { method: 'POST', body: JSON.stringify(data) }),
+
   // Recipes
   createRecipeItem: (data) => fetchAPI('/inventory/recipes', { method: 'POST', body: JSON.stringify(data) }),
   updateProductRecipe: (productId, items) => fetchAPI(`/inventory/recipes/product/${productId}`, { method: 'PUT', body: JSON.stringify({ items }) }),
@@ -113,6 +140,7 @@ export const api = {
 
   // Orders & POS
   getOrders: (params = '') => fetchAPI(`/orders${params ? '?' + params : ''}`),
+  getTransactions: (params = '') => fetchAPI(`/orders/transactions${params ? '?' + params : ''}`),
   createOrder: (orderData) => fetchAPI('/orders', { method: 'POST', body: JSON.stringify(orderData) }),
   updateOrderStatus: (id, status) => fetchAPI(`/orders/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status }) }),
   getOrderByToken: (token) => fetchAPI(`/orders/token/${token}`),
@@ -126,8 +154,10 @@ export const api = {
   getShifts: () => fetchAPI('/shifts'),
   getBranches: () => fetchAPI('/shifts/branches'),
   getCurrentShift: () => fetchAPI('/shifts/current'),
+  getShiftReport: (id) => fetchAPI(`/shifts/${id}/report`),
   openShift: (data) => fetchAPI('/shifts/open', { method: 'POST', body: JSON.stringify(data) }),
   closeShift: (data) => fetchAPI('/shifts/close', { method: 'POST', body: JSON.stringify(data) }),
+  updateShift: (id, data) => fetchAPI(`/shifts/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   recordCashMovement: (data) => fetchAPI('/shifts/cash-movement', { method: 'POST', body: JSON.stringify(data) }),
 
   // Branches
@@ -139,6 +169,8 @@ export const api = {
 
   // Reports & Settings
   getDashboardStats: () => fetchAPI('/reports/dashboard-stats'),
+  getBestSellers: (params = '') => fetchAPI(`/reports/best-sellers${params ? '?' + params : ''}`),
+  getSalesByHour: (params = '') => fetchAPI(`/reports/sales-by-hour${params ? '?' + params : ''}`),
   getSalesReport: (params = '') => fetchAPI(`/reports/sales${params ? '?' + params : ''}`),
   getSettings: () => fetchAPI('/reports/settings'),
   updateSettings: (data) => fetchAPI('/reports/settings', { method: 'PUT', body: JSON.stringify(data) }),

@@ -3,6 +3,7 @@ import { ModalPortal } from './ModalPortal';
 import { ConfirmModal } from './ConfirmModal';
 import { Icons } from './Icons';
 import api from '../services/api.js';
+import { processAvatarImage } from '../utils/imageUtils.js';
 
 const ROLE_PREFIX = {
   'Administrator': 'ADM',
@@ -28,7 +29,12 @@ const DB_ROLE_TO_LABEL = {
   barista: 'Barista',
 };
 
-const DEFAULT_AVATAR = 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80';
+const fallbackAvatar = (name) => {
+  const initial = (name || 'U').trim().charAt(0).toUpperCase();
+  return `data:image/svg+xml;utf8,${encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64"><rect width="64" height="64" rx="16" fill="#C08552"/><text x="32" y="41" font-family="Arial, sans-serif" font-size="28" font-weight="bold" fill="#FFFDF9" text-anchor="middle">${initial}</text></svg>`
+  )}`;
+};
 
 const getLastName = (fullName) => (fullName || '').trim().split(/\s+/).pop() || 'user';
 const generatePassword = (fullName) => getLastName(fullName).toLowerCase();
@@ -69,12 +75,15 @@ export function UserManagement({ employees, can, onAddEmployee, onUpdateEmployee
     }
   }, [modalOpen, modalMode, role, employees]);
 
-  const handlePhotoChange = (e) => {
+  const handlePhotoChange = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => setAvatar(reader.result);
-    reader.readAsDataURL(file);
+    try {
+      const processedUrl = await processAvatarImage(file, 512);
+      setAvatar(processedUrl);
+    } catch (err) {
+      console.warn('Error processing photo:', err);
+    }
   };
 
   const openAdd = () => {
@@ -140,7 +149,7 @@ export function UserManagement({ employees, can, onAddEmployee, onUpdateEmployee
 
     if (modalMode === 'edit') {
       const existing = employees.find(e => e.id === editingId);
-      const nextAvatar = avatar || existing?.avatar || DEFAULT_AVATAR;
+      const nextAvatar = avatar || existing?.avatar || fallbackAvatar(name);
       try {
         await api.updateUser(editingId, {
           name,
@@ -179,7 +188,7 @@ export function UserManagement({ employees, can, onAddEmployee, onUpdateEmployee
         role: ROLE_TO_DB[role] || 'cashier',
         password,
         pin,
-        avatar: avatar || DEFAULT_AVATAR,
+        avatar: avatar || fallbackAvatar(name),
       });
       onAddEmployee({
         id: String(res.id),
@@ -189,7 +198,7 @@ export function UserManagement({ employees, can, onAddEmployee, onUpdateEmployee
         role,
         employeeId,
         status: res.is_active ? 'Active' : 'Inactive',
-        avatar: avatar || DEFAULT_AVATAR,
+        avatar: avatar || fallbackAvatar(name),
       });
     } catch (err) {
       console.warn('API error creating user, falling back to local:', err);
@@ -201,7 +210,7 @@ export function UserManagement({ employees, can, onAddEmployee, onUpdateEmployee
         role,
         employeeId,
         status: 'Active',
-        avatar: avatar || DEFAULT_AVATAR,
+        avatar: avatar || fallbackAvatar(name),
       });
     }
 
@@ -277,9 +286,11 @@ export function UserManagement({ employees, can, onAddEmployee, onUpdateEmployee
               >
                 <div className="flex items-center justify-between mb-3">
                   <img
-                    src={emp.avatar || DEFAULT_AVATAR}
+                    src={emp.avatar || fallbackAvatar(emp.name)}
                     alt={emp.name}
-                    className="w-12 h-12 rounded-2xl object-cover ring-2 ring-amber-900/20 shadow"
+                    className="w-12 h-12 rounded-2xl object-cover shrink-0 ring-2 ring-amber-900/20 shadow"
+                    onError={e => { e.currentTarget.src = fallbackAvatar(emp.name); }}
+                    style={{ imageRendering: 'high-quality' }}
                   />
                   {can('staff', 'edit') ? (
                     <button
@@ -348,7 +359,7 @@ export function UserManagement({ employees, can, onAddEmployee, onUpdateEmployee
           <div className="glass-card rounded-3xl border border-white/60 p-6 space-y-6">
             <div>
               <div className="flex items-center gap-3 mb-2">
-                <img src={selectedStaff.avatar || DEFAULT_AVATAR} className="w-10 h-10 rounded-full object-cover" alt="" />
+                <img src={selectedStaff.avatar || fallbackAvatar(selectedStaff.name)} className="w-10 h-10 rounded-full object-cover" alt="" onError={e => { e.currentTarget.src = fallbackAvatar(selectedStaff.name); }} />
                 <div>
                   <h3 className="font-heading font-extrabold text-base text-[#3C2A21]">{selectedStaff.name}</h3>
                   <span className="text-xs font-bold text-[#C08552]">{selectedStaff.role} Permissions</span>
@@ -571,9 +582,10 @@ export function UserManagement({ employees, can, onAddEmployee, onUpdateEmployee
           <div className="w-full max-w-sm glass-card rounded-3xl p-6 space-y-5 border border-white/60 text-center">
             <div className="relative w-24 h-24 mx-auto">
               <img
-                src={previewData?.avatar || previewStaff.avatar || DEFAULT_AVATAR}
+                src={previewData?.avatar || previewStaff.avatar || fallbackAvatar(previewData?.name || previewStaff.name)}
                 alt={previewData?.name || previewStaff.name}
                 className="w-24 h-24 rounded-3xl object-cover ring-4 ring-amber-900/10 shadow-lg mx-auto"
+                onError={e => { e.currentTarget.src = fallbackAvatar(previewData?.name || previewStaff.name); }}
               />
               <span className={`absolute -bottom-1 -right-1 w-6 h-6 rounded-full border-2 border-[#FFFDF9] ${
                 (previewData?.is_active ?? previewStaff.status === 'Active') ? 'bg-emerald-500' : 'bg-red-500'

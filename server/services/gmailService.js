@@ -456,7 +456,7 @@ const extractEmail = (from) => {
 };
 
 const PO_CODE_RE = /\bPO[- ]?\d{3,6}\b/i;
-const extractPoCode = (text) => {
+export const extractPoCode = (text) => {
   const m = text.match(PO_CODE_RE);
   return m ? m[0].replace(/[^0-9PO]/gi, '').toUpperCase() : null;
 };

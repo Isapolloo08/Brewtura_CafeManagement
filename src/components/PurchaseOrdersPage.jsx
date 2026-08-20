@@ -668,37 +668,7 @@ export function PurchaseOrdersPage({ purchaseOrders, suppliers, ingredients, can
 
       <InboxPanel />
 
-      {/* Order Fulfillment Pipeline */}
-      <div className="glass-card p-5 rounded-2xl border border-white/60">
-        <div className="flex items-center justify-between mb-2">
-          <span className="text-xs font-bold text-amber-900/60">Fulfillment Pipeline</span>
-          <span className="text-[10px] font-bold text-amber-900/40">{purchaseOrders.length} total orders</span>
-        </div>
-        <div className="space-y-2">
-          {['Pending Approval', 'In Transit', 'Delivered', 'Completed'].map(status => {
-            const count = purchaseOrders.filter(po => po.status === status).length;
-            const pct = purchaseOrders.length > 0 ? Math.round((count / purchaseOrders.length) * 100) : 0;
-            return (
-              <div key={status}>
-                <div className="flex justify-between text-[11px] font-semibold mb-0.5">
-                  <span className="text-[#3C2A21]">{status}</span>
-                  <span className="text-amber-900/50">{count} ({pct}%)</span>
-                </div>
-                <div className="w-full h-2 rounded-full bg-amber-900/10 overflow-hidden">
-                  <div
-                    className={`h-full rounded-full animate-progress-in ${status === 'Completed' ? 'bg-gradient-to-r from-emerald-500 to-green-600' :
-                      status === 'Delivered' ? 'bg-gradient-to-r from-blue-500 to-indigo-600' :
-                        status === 'In Transit' ? 'bg-gradient-to-r from-amber-500 to-orange-600' :
-                          'bg-gradient-to-r from-zinc-400 to-zinc-500'
-                      }`}
-                    style={{ width: `${pct}%` }}
-                  />
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
+
 
       <div className="glass-card rounded-3xl border border-white/60 p-6 overflow-hidden">
         <div className="overflow-auto max-h-[520px] rounded-2xl">

@@ -273,6 +273,7 @@ function TemplateFormModal({ isOpen, onClose, initial, onSave }) {
   const [name, setName] = useState(initial?.name || '');
   const [type, setType] = useState(initial?.type || 'size');
   const [priceDelta, setPriceDelta] = useState(initial?.priceDelta ?? 0);
+  const [stock, setStock] = useState(initial?.stock ?? 0);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
 
@@ -286,7 +287,7 @@ function TemplateFormModal({ isOpen, onClose, initial, onSave }) {
       return;
     }
     setSaving(true);
-    const ok = await onSave({ name: name.trim(), type, priceDelta: parseFloat(priceDelta) || 0 });
+    const ok = await onSave({ name: name.trim(), type, priceDelta: parseFloat(priceDelta) || 0, stock: parseInt(stock, 10) || 0 });
     setSaving(false);
     if (ok) {
       onClose();
@@ -344,6 +345,20 @@ function TemplateFormModal({ isOpen, onClose, initial, onSave }) {
               placeholder="0.00"
             />
             <p className="text-[10px] text-amber-900/40 font-medium mt-1">Base customization = $0. Extra cost applied to base price.</p>
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-[#4A2E2A] mb-1">Stock (pcs)</label>
+            <input
+              type="number"
+              min="0"
+              step="1"
+              value={stock}
+              onChange={(e) => setStock(e.target.value)}
+              className="w-full px-3 py-2 text-xs rounded-xl glass-input font-bold text-[#3C2A21]"
+              placeholder="0"
+            />
+            <p className="text-[10px] text-amber-900/40 font-medium mt-1">Available quantity in stock (pieces/units).</p>
           </div>
 
           {error && (
@@ -510,9 +525,14 @@ function OptionLibraryCard({ title, subtitle, items, canEdit, canDelete, onAdd, 
         {items.map(it => (
           <div key={it.id} className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-white/50 border border-amber-900/10 text-xs">
             <span className="font-semibold text-[#3C2A21] flex-1 truncate">{it.name}</span>
-            <span className={`font-bold whitespace-nowrap ${formatValue(it) === 'Base' || formatValue(it).startsWith('$0.00') ? 'text-amber-900/40' : 'text-emerald-700'}`}>
-              {formatValue(it)}
-            </span>
+            <div className="flex items-center gap-2">
+              <span className={`font-bold whitespace-nowrap ${formatValue(it) === 'Base' || formatValue(it).startsWith('$0.00') ? 'text-amber-900/40' : 'text-emerald-700'}`}>
+                {formatValue(it)}
+              </span>
+              <span className="px-2 py-0.5 rounded-md bg-amber-900/5 text-[#693F27] font-extrabold text-[10px] whitespace-nowrap">
+                {it.stock ?? 0} pcs
+              </span>
+            </div>
             <div className="flex items-center gap-1">
               {canEdit && (
                 <button type="button" onClick={() => onEdit(it)} title="Edit" className="text-amber-900/40 hover:text-[#3C2A21] transition-colors">
@@ -538,6 +558,7 @@ function OptionLibraryCard({ title, subtitle, items, canEdit, canDelete, onAdd, 
 function OptionFormModal({ isOpen, onClose, initial, onSave, title, valueKey = 'priceDelta', valueLabel = 'Price Delta ($)', valueHint, namePlaceholder }) {
   const [name, setName] = useState(initial?.name || '');
   const [value, setValue] = useState(initial?.[valueKey] ?? 0);
+  const [stock, setStock] = useState(initial?.stock ?? 0);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
 
@@ -551,7 +572,7 @@ function OptionFormModal({ isOpen, onClose, initial, onSave, title, valueKey = '
       return;
     }
     setSaving(true);
-    const payload = { name: name.trim() };
+    const payload = { name: name.trim(), stock: parseInt(stock, 10) || 0 };
     payload[valueKey] = parseFloat(value) || 0;
     const ok = await onSave(payload);
     setSaving(false);
@@ -601,6 +622,20 @@ function OptionFormModal({ isOpen, onClose, initial, onSave, title, valueKey = '
               {valueHint && <p className="text-[10px] text-amber-900/40 font-medium mt-1">{valueHint}</p>}
             </div>
 
+            <div>
+              <label className="block text-xs font-bold text-[#4A2E2A] mb-1">Stock (pcs)</label>
+              <input
+                type="number"
+                min="0"
+                step="1"
+                value={stock}
+                onChange={(e) => setStock(e.target.value)}
+                className="w-full px-3 py-2 text-xs rounded-xl glass-input font-bold text-[#3C2A21]"
+                placeholder="0"
+              />
+              <p className="text-[10px] text-amber-900/40 font-medium mt-1">Available quantity in stock (pieces/units).</p>
+            </div>
+
             {error && (
               <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/20 flex items-start gap-2">
                 <span className="text-red-600 font-bold text-xs mt-0.5">⚠</span>
@@ -631,10 +666,15 @@ function OptionFormModal({ isOpen, onClose, initial, onSave, title, valueKey = '
   );
 }
 
-export function CustomizationsPage({ products, ingredients, can, onUpdateProduct, customizationTemplates, temperatures, milks, addons, onRefreshCustomizationTemplates, onRefreshTemperatures, onRefreshMilks, onRefreshAddons }) {
+export function CustomizationsPage({ products, ingredients, can, onUpdateProduct, customizationTemplates, temperatures, milks, addons, onRefreshCustomizationTemplates, onRefreshTemperatures, onRefreshMilks, onRefreshAddons, onAddStockMovement }) {
   const [editingCustomization, setEditingCustomization] = useState(null);
   const [previewCustomization, setPreviewCustomization] = useState(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
+
+  const [adjustingStockItem, setAdjustingStockItem] = useState(null);
+  const [adjType, setAdjType] = useState('Stock In');
+  const [adjQty, setAdjQty] = useState(10);
+  const [adjReason, setAdjReason] = useState('Stock replenishment');
 
   const [showTemplateCreate, setShowTemplateCreate] = useState(false);
   const [editingTemplate, setEditingTemplate] = useState(null);
@@ -652,6 +692,9 @@ export function CustomizationsPage({ products, ingredients, can, onUpdateProduct
   const [editingAddon, setEditingAddon] = useState(null);
   const [deletingAddon, setDeletingAddon] = useState(null);
 
+  const [invTab, setInvTab] = useState('all');
+  const [invSearch, setInvSearch] = useState('');
+
   const allCustomizations = products.flatMap(product =>
     (product.customizations || []).map((v, idx) => ({
       ...v,
@@ -664,6 +707,91 @@ export function CustomizationsPage({ products, ingredients, can, onUpdateProduct
     }))
   );
 
+  const countProductUsage = (type, name) => {
+    const n = (name || '').toLowerCase();
+    return products.reduce((count, p) => {
+      if (type === 'size') {
+        return count + (((p.customizations || []).some(c => c.name && c.name.toLowerCase() === n)) ? 1 : 0);
+      }
+      if (type === 'temperature') {
+        return count + (((p.temperatures || []).some(t => t.name && t.name.toLowerCase() === n)) ? 1 : 0);
+      }
+      if (type === 'milk') {
+        return count + (((p.milks || []).some(m => m.name && m.name.toLowerCase() === n)) ? 1 : 0);
+      }
+      if (type === 'addon') {
+        return count + (((p.addons || []).some(a => a.name && a.name.toLowerCase() === n)) ? 1 : 0);
+      }
+      return count;
+    }, 0);
+  };
+
+  const inventoryRows = [
+    ...(customizationTemplates.sizes || []).map(s => ({
+      id: s.id,
+      type: 'size',
+      typeLabel: 'Size',
+      name: s.name,
+      price: parseFloat(s.priceDelta) || 0,
+      stock: s.stock ?? 0,
+      usage: countProductUsage('size', s.name),
+      edit: () => setEditingTemplate(s),
+      del: () => setDeletingTemplate(s),
+      add: () => { setEditingTemplate(null); setShowTemplateCreate(true); },
+    })),
+    ...(temperatures || []).map(t => ({
+      id: t.id,
+      type: 'temperature',
+      typeLabel: 'Temperature',
+      name: t.name,
+      price: parseFloat(t.priceDelta) || 0,
+      stock: t.stock ?? 0,
+      usage: countProductUsage('temperature', t.name),
+      edit: () => setEditingTemp(t),
+      del: () => setDeletingTemp(t),
+      add: () => { setEditingTemp(null); setShowTempCreate(true); },
+    })),
+    ...(milks || []).map(m => ({
+      id: m.id,
+      type: 'milk',
+      typeLabel: 'Milk',
+      name: m.name,
+      price: parseFloat(m.priceDelta) || 0,
+      stock: m.stock ?? 0,
+      usage: countProductUsage('milk', m.name),
+      edit: () => setEditingMilk(m),
+      del: () => setDeletingMilk(m),
+      add: () => { setEditingMilk(null); setShowMilkCreate(true); },
+    })),
+    ...(addons || []).map(a => ({
+      id: a.id,
+      type: 'addon',
+      typeLabel: 'Add-On',
+      name: a.name,
+      price: parseFloat(a.price) || 0,
+      stock: a.stock ?? 0,
+      usage: countProductUsage('addon', a.name),
+      edit: () => setEditingAddon(a),
+      del: () => setDeletingAddon(a),
+      add: () => { setEditingAddon(null); setShowAddonCreate(true); },
+    })),
+  ];
+
+  const inventoryTabs = [
+    { id: 'all', label: 'All', count: inventoryRows.length },
+    { id: 'size', label: 'Sizes', count: inventoryRows.filter(r => r.type === 'size').length },
+    { id: 'temperature', label: 'Temperatures', count: inventoryRows.filter(r => r.type === 'temperature').length },
+    { id: 'milk', label: 'Milks', count: inventoryRows.filter(r => r.type === 'milk').length },
+    { id: 'addon', label: 'Add-Ons', count: inventoryRows.filter(r => r.type === 'addon').length },
+  ];
+
+  const filteredInventory = inventoryRows.filter(r => {
+    if (invTab !== 'all' && r.type !== invTab) return false;
+    const q = invSearch.trim().toLowerCase();
+    if (q && !(r.name.toLowerCase().includes(q) || r.typeLabel.toLowerCase().includes(q))) return false;
+    return true;
+  });
+
   const handleSaveTemplate = async (data) => {
     try {
       if (editingTemplate) {
@@ -671,12 +799,14 @@ export function CustomizationsPage({ products, ingredients, can, onUpdateProduct
           name: data.name,
           customization_type: data.type,
           default_price_delta: data.priceDelta,
+          stock: data.stock,
         });
       } else {
         await api.createCustomizationTemplate({
           name: data.name,
           customization_type: data.type,
           default_price_delta: data.priceDelta,
+          stock: data.stock,
         });
       }
       setEditingTemplate(null);
@@ -707,19 +837,9 @@ export function CustomizationsPage({ products, ingredients, can, onUpdateProduct
   const handleSaveTempOption = async (data) => {
     try {
       if (editingTemp) {
-        await api.updateTemperatureOption(editingTemp.id, { name: data.name, price_delta: data.priceDelta });
+        await api.updateTemperatureOption(editingTemp.id, { name: data.name, price_delta: data.priceDelta, stock: data.stock });
       } else {
-        await api.createTemperatureOption({ name: data.name, price_delta: data.priceDelta });
-      }
-      // Sync to customization_templates table so it appears in the customization library
-      try {
-        await api.createCustomizationTemplate({
-          name: data.name,
-          customization_type: 'option',
-          default_price_delta: data.priceDelta,
-        });
-      } catch (tmplErr) {
-        console.warn('Failed to insert temperature option into customization_templates:', tmplErr);
+        await api.createTemperatureOption({ name: data.name, price_delta: data.priceDelta, stock: data.stock });
       }
       setEditingTemp(null);
       onRefreshTemperatures();
@@ -745,19 +865,9 @@ export function CustomizationsPage({ products, ingredients, can, onUpdateProduct
   const handleSaveMilkOption = async (data) => {
     try {
       if (editingMilk) {
-        await api.updateMilkOption(editingMilk.id, { name: data.name, price_delta: data.priceDelta });
+        await api.updateMilkOption(editingMilk.id, { name: data.name, price_delta: data.priceDelta, stock: data.stock });
       } else {
-        await api.createMilkOption({ name: data.name, price_delta: data.priceDelta });
-      }
-      // Sync to customization_templates table so it appears in the customization library
-      try {
-        await api.createCustomizationTemplate({
-          name: data.name,
-          customization_type: 'option',
-          default_price_delta: data.priceDelta,
-        });
-      } catch (tmplErr) {
-        console.warn('Failed to insert milk option into customization_templates:', tmplErr);
+        await api.createMilkOption({ name: data.name, price_delta: data.priceDelta, stock: data.stock });
       }
       setEditingMilk(null);
       onRefreshMilks();
@@ -783,19 +893,9 @@ export function CustomizationsPage({ products, ingredients, can, onUpdateProduct
   const handleSaveAddon = async (data) => {
     try {
       if (editingAddon) {
-        await api.updateAddon(editingAddon.id, { name: data.name, price: data.price });
+        await api.updateAddon(editingAddon.id, { name: data.name, price: data.price, stock: data.stock });
       } else {
-        await api.createAddon({ name: data.name, price: data.price });
-      }
-      // Sync to customization_templates table so it appears in the customization library
-      try {
-        await api.createCustomizationTemplate({
-          name: data.name,
-          customization_type: 'option',
-          default_price_delta: data.price,
-        });
-      } catch (tmplErr) {
-        console.warn('Failed to insert add-on into customization_templates:', tmplErr);
+        await api.createAddon({ name: data.name, price: data.price, stock: data.stock });
       }
       setEditingAddon(null);
       onRefreshAddons();
@@ -887,9 +987,14 @@ export function CustomizationsPage({ products, ingredients, can, onUpdateProduct
               {customizationTemplates.sizes.map(s => (
                 <div key={s.id} className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-white/50 border border-amber-900/10 text-xs">
                   <span className="font-semibold text-[#3C2A21] flex-1 truncate">{s.name}</span>
-                  <span className={`font-bold whitespace-nowrap ${s.priceDelta === 0 ? 'text-amber-900/40' : 'text-emerald-700'}`}>
-                    {s.priceDelta === 0 ? 'Base' : `+$${s.priceDelta.toFixed(2)}`}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className={`font-bold whitespace-nowrap ${s.priceDelta === 0 ? 'text-amber-900/40' : 'text-emerald-700'}`}>
+                      {s.priceDelta === 0 ? 'Base' : `+$${s.priceDelta.toFixed(2)}`}
+                    </span>
+                    <span className="px-2 py-0.5 rounded-md bg-amber-900/5 text-[#693F27] font-extrabold text-[10px] whitespace-nowrap">
+                      {s.stock ?? 0} pcs
+                    </span>
+                  </div>
                   <div className="flex items-center gap-1">
                     {can('menu', 'edit') && (
                       <button
@@ -972,6 +1077,135 @@ export function CustomizationsPage({ products, ingredients, can, onUpdateProduct
             onDelete={(it) => setDeletingAddon(it)}
           />
         </div>
+      </div>
+
+      {/* Options Inventory */}
+      <div className="glass-card rounded-3xl border border-white/60 p-6">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <Icons.Flask className="w-4 h-4 text-[#693F27]" />
+            <h3 className="font-heading font-extrabold text-lg text-[#3C2A21]">Options Inventory</h3>
+            <span className="text-[10px] text-amber-900/40 font-bold">Sizes, temperatures, milks & add-ons</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="relative">
+              <Icons.Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-amber-900/40" />
+              <input
+                type="text"
+                value={invSearch}
+                onChange={(e) => setInvSearch(e.target.value)}
+                placeholder="Search options..."
+                className="pl-8 pr-3 py-1.5 rounded-xl bg-amber-900/5 border border-amber-900/10 text-[11px] font-semibold text-[#3C2A21] placeholder-amber-900/40 focus:outline-none focus:border-[#C08552]"
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Type tabs */}
+        <div className="flex flex-wrap gap-2 mb-4">
+          {inventoryTabs.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => setInvTab(t.id)}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[11px] font-extrabold transition-colors ${
+                invTab === t.id
+                  ? 'bg-[#3C2A21] text-amber-100 shadow'
+                  : 'bg-amber-900/5 text-amber-900/60 hover:bg-amber-900/10'
+              }`}
+            >
+              {t.label}
+              <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-extrabold ${
+                invTab === t.id ? 'bg-amber-100/20 text-amber-100' : 'bg-amber-900/10 text-[#693F27]'
+              }`}>{t.count}</span>
+            </button>
+          ))}
+        </div>
+
+        {filteredInventory.length === 0 ? (
+          <p className="p-6 text-center text-xs font-bold text-amber-900/50 bg-amber-900/5 rounded-2xl">
+            No options found{invTab !== 'all' ? ` in ${inventoryTabs.find(t => t.id === invTab)?.label}` : ''}.
+          </p>
+        ) : (
+          <div className="overflow-x-auto rounded-2xl border border-white/60">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="border-b border-amber-900/10 text-amber-900/50 text-[10px] font-extrabold uppercase tracking-wider bg-amber-900/5">
+                  <th className="py-3 px-4">Type</th>
+                  <th className="py-3 pr-4">Name</th>
+                  <th className="py-3 pr-4 text-right">Price</th>
+                  <th className="py-3 pr-4 text-right">Stock (pcs)</th>
+                  <th className="py-3 pr-4 text-right">Used by</th>
+                  <th className="py-3 pr-4 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-amber-900/8 text-xs font-semibold">
+                {filteredInventory.map((r) => (
+                  <tr key={`${r.type}-${r.id}`} className="hover:bg-amber-900/4 transition-colors">
+                    <td className="py-3 px-4">
+                      <span className={`px-2 py-0.5 rounded-full text-[9px] font-extrabold uppercase tracking-wider ${
+                        r.type === 'size' ? 'bg-amber-500/12 text-amber-900'
+                        : r.type === 'temperature' ? 'bg-blue-500/10 text-blue-700'
+                        : r.type === 'milk' ? 'bg-emerald-500/10 text-emerald-800'
+                        : 'bg-[#C08552]/15 text-[#693F27]'
+                      }`}>
+                        {r.typeLabel}
+                      </span>
+                    </td>
+                    <td className="py-3 pr-4 font-bold text-[#3C2A21]">{r.name}</td>
+                    <td className={`py-3 pr-4 text-right font-bold ${
+                      r.price === 0 ? 'text-amber-900/40' : 'text-emerald-700'
+                    }`}>
+                      {r.price === 0 ? 'Base' : `+$${r.price.toFixed(2)}`}
+                    </td>
+                    <td className="py-3 pr-4 text-right font-bold text-[#3C2A21]">
+                      <span className="px-2.5 py-1 rounded-lg bg-amber-900/5 border border-amber-900/10 text-[#693F27]">
+                        {r.stock} pcs
+                      </span>
+                    </td>
+                    <td className="py-3 pr-4 text-right text-amber-900/70">
+                      {r.usage > 0 ? (
+                        <span className="font-extrabold text-[#693F27]">{r.usage} product{r.usage === 1 ? '' : 's'}</span>
+                      ) : (
+                        <span className="text-amber-900/40">Not used</span>
+                      )}
+                    </td>
+                    <td className="py-3 pr-4">
+                      <div className="flex items-center justify-end gap-1">
+                        {can('stock_movements', 'add') && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setAdjustingStockItem(r);
+                              setAdjType('Stock In');
+                              setAdjQty(10);
+                              setAdjReason('Stock replenishment');
+                            }}
+                            className="px-2.5 py-1 rounded-lg bg-amber-900/10 text-[#3C2A21] text-[10px] font-bold hover:bg-[#3C2A21] hover:text-amber-100 transition-all"
+                          >
+                            Adjust Stock
+                          </button>
+                        )}
+                        {can('menu', 'edit') && (
+                          <button type="button" onClick={r.edit} title="Edit"
+                            className="p-1.5 rounded-lg text-amber-900/40 hover:text-[#3C2A21] hover:bg-amber-900/10 transition-colors">
+                            <Icons.Edit className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                        {can('menu', 'delete') && (
+                          <button type="button" onClick={r.del} title="Delete"
+                            className="p-1.5 rounded-lg text-red-500/50 hover:text-red-600 hover:bg-red-500/10 transition-colors">
+                            <Icons.Trash className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       {allCustomizations.length === 0 ? (
@@ -1135,6 +1369,101 @@ export function CustomizationsPage({ products, ingredients, can, onUpdateProduct
         message={`Remove "${deletingAddon?.name}" from the add-on library? Products already using it won't be affected.`}
         confirmLabel="Delete"
       />
+
+      {adjustingStockItem && (
+        <ModalPortal>
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+            <div className="w-full max-w-md glass-card rounded-3xl p-6 space-y-4 border border-white/60 animate-scaleIn text-[#3C2A21]">
+              <div className="flex items-center justify-between border-b border-amber-900/10 pb-3">
+                <div>
+                  <h3 className="font-heading font-extrabold text-xl text-[#3C2A21]">Adjust Stock — {adjustingStockItem.name}</h3>
+                  <p className="text-xs text-amber-900/60 font-medium">Record a manual stock movement for this {adjustingStockItem.typeLabel.toLowerCase()}</p>
+                </div>
+                <button onClick={() => setAdjustingStockItem(null)} className="text-amber-900/40 hover:text-[#3C2A21] font-bold text-lg">✕</button>
+              </div>
+
+              <form
+                onSubmit={async (e) => {
+                  e.preventDefault();
+                  if (!adjustingStockItem) return;
+                  const isDeduction = adjType === 'Stock Out' || adjType === 'Spoilage' || adjType === 'Waste';
+                  await onAddStockMovement({
+                    customizationTemplateId: adjustingStockItem.id,
+                    ingredientName: adjustingStockItem.name,
+                    type: adjType,
+                    quantity: `${isDeduction ? '-' : '+'}${adjQty} pcs`,
+                    reason: adjReason,
+                    user: 'Marco V. (Manager)'
+                  });
+                  setAdjustingStockItem(null);
+                  // Refresh all option stock from server after movement is recorded
+                  onRefreshCustomizationTemplates();
+                  onRefreshTemperatures();
+                  onRefreshMilks();
+                  onRefreshAddons();
+                }}
+                className="space-y-4"
+              >
+                <div>
+                  <label className="block text-[11px] font-bold text-[#4A2E2A] uppercase tracking-wider mb-1.5">Adjustment Type</label>
+                  <select
+                    value={adjType}
+                    onChange={(e) => setAdjType(e.target.value)}
+                    className="w-full px-3 py-2.5 text-xs rounded-xl glass-input font-semibold text-[#3C2A21]"
+                  >
+                    <option value="Stock In">Stock In (+)</option>
+                    <option value="Stock Out">Stock Out (-)</option>
+                    <option value="Spoilage">Spoilage (-)</option>
+                    <option value="Waste">Waste (-)</option>
+                    <option value="Manual Adjustment">Manual Adjustment (+)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-[#4A2E2A] uppercase tracking-wider mb-1.5">Quantity (pcs)</label>
+                  <input
+                    type="number"
+                    min="1"
+                    step="1"
+                    required
+                    value={adjQty}
+                    onChange={(e) => setAdjQty(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                    className="w-full px-3 py-2.5 text-xs rounded-xl glass-input font-bold text-[#3C2A21]"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-[#4A2E2A] uppercase tracking-wider mb-1.5">Reason / Note</label>
+                  <input
+                    type="text"
+                    required
+                    value={adjReason}
+                    onChange={(e) => setAdjReason(e.target.value)}
+                    className="w-full px-3 py-2.5 text-xs rounded-xl glass-input font-semibold text-[#3C2A21]"
+                    placeholder="e.g. Received new shipment / Damaged package"
+                  />
+                </div>
+
+                <div className="flex gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setAdjustingStockItem(null)}
+                    className="flex-1 py-2.5 rounded-xl bg-amber-900/10 text-xs font-bold text-[#3C2A21] hover:bg-amber-900/15"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="flex-1 py-2.5 rounded-xl bg-[#3C2A21] text-amber-100 text-xs font-bold shadow-md hover:brightness-110"
+                  >
+                    Save Movement
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </ModalPortal>
+      )}
     </div>
   );
 }

@@ -1,4 +1,5 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
+import api from '../services/api.js';
 
 // ─── Demo fallbacks (kept so the dashboard still looks rich when backend has no data) ───
 const DEMO_SALES_BY_HOUR = [
@@ -55,6 +56,20 @@ export function Dashboard({ ingredients, products, orders, onNavigate, onOpenNew
   const [salesTimeframe, setSalesTimeframe] = useState('Today');
   const hasOrders = orders.length > 0;
 
+  // ─── Best Sellers Today (backend-sourced) ───
+  const [backendBestSellers, setBackendBestSellers] = useState(null);
+  const [bestSellersLoading, setBestSellersLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setBestSellersLoading(true);
+    api.getBestSellers()
+      .then((data) => { if (!cancelled) setBackendBestSellers(data?.best_sellers || []); })
+      .catch((err) => { console.warn('Failed to fetch best sellers:', err); if (!cancelled) setBackendBestSellers([]); })
+      .finally(() => { if (!cancelled) setBestSellersLoading(false); });
+    return () => { cancelled = true; };
+  }, []);
+
   // ─── Stat cards ───
   const stats = useMemo(() => {
     const sales = orders.reduce((s, o) => s + (parseFloat(o.total) || 0), 0);
@@ -68,17 +83,40 @@ export function Dashboard({ ingredients, products, orders, onNavigate, onOpenNew
     };
   }, [orders]);
 
+  // ─── Sales by Hour (backend-sourced) ───
+  const [backendSalesByHour, setBackendSalesByHour] = useState(null);
+  const [salesByHourLoading, setSalesByHourLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setSalesByHourLoading(true);
+    api.getSalesByHour()
+      .then((data) => { if (!cancelled) setBackendSalesByHour(data?.sales_by_hour || []); })
+      .catch((err) => { console.warn('Failed to fetch sales by hour:', err); if (!cancelled) setBackendSalesByHour([]); })
+      .finally(() => { if (!cancelled) setSalesByHourLoading(false); });
+    return () => { cancelled = true; };
+  }, []);
+
   // ─── Sales by Hour ───
   const salesByHour = useMemo(() => {
-    if (!hasOrders) return DEMO_SALES_BY_HOUR;
     const buckets = [6, 8, 10, 12, 14, 16, 18, 20];
     const totals = {};
-    orders.forEach(o => {
-      const h = parseHour(o.createdAt);
-      if (h == null) return;
-      totals[h] = (totals[h] || 0) + (parseFloat(o.total) || 0);
-    });
+
+    // Prefer the backend aggregation when it has data for the day.
+    if (backendSalesByHour && backendSalesByHour.length > 0) {
+      backendSalesByHour.forEach((row) => {
+        totals[Number(row.hour)] = (totals[Number(row.hour)] || 0) + (parseFloat(row.total_sales) || 0);
+      });
+    } else if (hasOrders) {
+      orders.forEach(o => {
+        const h = parseHour(o.createdAt);
+        if (h == null) return;
+        totals[h] = (totals[h] || 0) + (parseFloat(o.total) || 0);
+      });
+    }
+
     const vals = buckets.map(h => Math.round(totals[h] || 0));
+    if (!hasOrders && !(backendSalesByHour && backendSalesByHour.length > 0)) return DEMO_SALES_BY_HOUR;
     if (vals.every(v => v === 0)) return DEMO_SALES_BY_HOUR;
     const max = Math.max(...vals, 1);
     return buckets.map((h, i) => ({
@@ -86,7 +124,7 @@ export function Dashboard({ ingredients, products, orders, onNavigate, onOpenNew
       val: vals[i],
       height: `${Math.max(12, Math.round((vals[i] / max) * 100))}%`,
     }));
-  }, [orders, hasOrders]);
+  }, [orders, hasOrders, backendSalesByHour]);
 
   const peakIdx = salesByHour.reduce(
     (best, b, i) => (b.val > best.val ? { idx: i, val: b.val } : best),
@@ -128,6 +166,18 @@ export function Dashboard({ ingredients, products, orders, onNavigate, onOpenNew
 
   // ─── Best Sellers Today ───
   const bestSellers = useMemo(() => {
+    // Prefer the backend aggregation when it has data for the day.
+    if (backendBestSellers && backendBestSellers.length > 0) {
+      return backendBestSellers.slice(0, 4).map((item, i) => ({
+        rank: String(i + 1),
+        name: item.name,
+        category: item.category || 'Item',
+        sales: `${item.total_sold} sold`,
+        revenue: `$${Number(item.total_revenue || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+      }));
+    }
+
+    // Fallback: derive from already-loaded orders (or demo data).
     if (!hasOrders) return DEMO_BEST_SELLERS;
     const agg = new Map();
     orders.forEach(o => {
@@ -156,7 +206,7 @@ export function Dashboard({ ingredients, products, orders, onNavigate, onOpenNew
       .sort((a, b) => b.qty - a.qty)
       .slice(0, 4)
       .map((item, i) => ({ ...item, rank: String(i + 1), sales: `${item.qty} sold` }));
-  }, [orders, products, hasOrders]);
+  }, [orders, products, hasOrders, backendBestSellers]);
 
   return (
     <div className="space-y-8 animate-fadeIn">
@@ -199,7 +249,11 @@ export function Dashboard({ ingredients, products, orders, onNavigate, onOpenNew
       {/* Metric Cards Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
         {/* Today's Sales */}
-        <div className="glass-card p-5 rounded-2xl border border-white/60 relative overflow-hidden group hover:scale-[1.02] transition-all duration-200">
+        <button
+          type="button"
+          onClick={() => onNavigate('reports', 'sales')}
+          className="w-full text-left glass-card p-5 rounded-2xl border border-white/60 relative overflow-hidden group hover:scale-[1.02] transition-all duration-200 cursor-pointer"
+        >
           <div className="flex items-center justify-between text-xs text-amber-900/60 font-bold mb-2">
             <span>Today's Sales</span>
             <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-700 text-[10px]">+14.2%</span>
@@ -207,10 +261,14 @@ export function Dashboard({ ingredients, products, orders, onNavigate, onOpenNew
           <p className="font-heading font-extrabold text-2xl text-[#3C2A21]">${stats.totalSalesToday.toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
           <p className="text-[11px] text-amber-900/50 mt-1 font-medium">{stats.totalTransactions} Completed Orders</p>
           <div className="absolute right-[-10px] bottom-[-10px] text-5xl opacity-10 group-hover:scale-110 transition-transform">💵</div>
-        </div>
+        </button>
 
         {/* Weekly Sales */}
-        <div className="glass-card p-5 rounded-2xl border border-white/60 relative overflow-hidden group hover:scale-[1.02] transition-all duration-200">
+        <button
+          type="button"
+          onClick={() => onNavigate('reports', 'sales')}
+          className="w-full text-left glass-card p-5 rounded-2xl border border-white/60 relative overflow-hidden group hover:scale-[1.02] transition-all duration-200 cursor-pointer"
+        >
           <div className="flex items-center justify-between text-xs text-amber-900/60 font-bold mb-2">
             <span>Weekly Sales</span>
             <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-700 text-[10px]">+8.5%</span>
@@ -218,10 +276,14 @@ export function Dashboard({ ingredients, products, orders, onNavigate, onOpenNew
           <p className="font-heading font-extrabold text-2xl text-[#3C2A21]">${stats.weeklySales.toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
           <p className="text-[11px] text-amber-900/50 mt-1 font-medium">Last 7 Days total</p>
           <div className="absolute right-[-10px] bottom-[-10px] text-5xl opacity-10 group-hover:scale-110 transition-transform">📅</div>
-        </div>
+        </button>
 
         {/* Monthly Sales */}
-        <div className="glass-card p-5 rounded-2xl border border-white/60 relative overflow-hidden group hover:scale-[1.02] transition-all duration-200">
+        <button
+          type="button"
+          onClick={() => onNavigate('reports', 'sales')}
+          className="w-full text-left glass-card p-5 rounded-2xl border border-white/60 relative overflow-hidden group hover:scale-[1.02] transition-all duration-200 cursor-pointer"
+        >
           <div className="flex items-center justify-between text-xs text-amber-900/60 font-bold mb-2">
             <span>Monthly Sales</span>
             <span className="px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-800 text-[10px]">On Target</span>
@@ -229,10 +291,14 @@ export function Dashboard({ ingredients, products, orders, onNavigate, onOpenNew
           <p className="font-heading font-extrabold text-2xl text-[#3C2A21]">${stats.monthlySales.toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
           <p className="text-[11px] text-amber-900/50 mt-1 font-medium">July 2026 Revenue</p>
           <div className="absolute right-[-10px] bottom-[-10px] text-5xl opacity-10 group-hover:scale-110 transition-transform">🏆</div>
-        </div>
+        </button>
 
         {/* Avg Order Value */}
-        <div className="glass-card p-5 rounded-2xl border border-white/60 relative overflow-hidden group hover:scale-[1.02] transition-all duration-200">
+        <button
+          type="button"
+          onClick={() => onNavigate('reports', 'sales')}
+          className="w-full text-left glass-card p-5 rounded-2xl border border-white/60 relative overflow-hidden group hover:scale-[1.02] transition-all duration-200 cursor-pointer"
+        >
           <div className="flex items-center justify-between text-xs text-amber-900/60 font-bold mb-2">
             <span>Avg Order Value</span>
             <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-700 text-[10px]">+$1.20</span>
@@ -240,10 +306,14 @@ export function Dashboard({ ingredients, products, orders, onNavigate, onOpenNew
           <p className="font-heading font-extrabold text-2xl text-[#3C2A21]">${stats.avgOrderValue.toFixed(2)}</p>
           <p className="text-[11px] text-amber-900/50 mt-1 font-medium">Per Ticket Average</p>
           <div className="absolute right-[-10px] bottom-[-10px] text-5xl opacity-10 group-hover:scale-110 transition-transform">🧾</div>
-        </div>
+        </button>
 
         {/* Total Transactions */}
-        <div className="glass-card p-5 rounded-2xl border border-white/60 relative overflow-hidden group hover:scale-[1.02] transition-all duration-200">
+        <button
+          type="button"
+          onClick={() => onNavigate('reports', 'sales')}
+          className="w-full text-left glass-card p-5 rounded-2xl border border-white/60 relative overflow-hidden group hover:scale-[1.02] transition-all duration-200 cursor-pointer"
+        >
           <div className="flex items-center justify-between text-xs text-amber-900/60 font-bold mb-2">
             <span>Total Transactions</span>
             <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-700 text-[10px]">Live</span>
@@ -251,7 +321,7 @@ export function Dashboard({ ingredients, products, orders, onNavigate, onOpenNew
           <p className="font-heading font-extrabold text-2xl text-[#3C2A21]">{stats.totalTransactions}</p>
           <p className="text-[11px] text-amber-900/50 mt-1 font-medium">98.2% Cashier Speed</p>
           <div className="absolute right-[-10px] bottom-[-10px] text-5xl opacity-10 group-hover:scale-110 transition-transform">⚡</div>
-        </div>
+        </button>
       </div>
 
       {/* Main Charts & Revenue Breakdown Section */}
@@ -260,24 +330,34 @@ export function Dashboard({ ingredients, products, orders, onNavigate, onOpenNew
         <div className="lg:col-span-2 glass-card p-6 rounded-3xl border border-white/60 flex flex-col justify-between">
           <div>
             <div className="flex items-center justify-between mb-6">
-              <div>
-                <h3 className="font-heading font-extrabold text-lg text-[#3C2A21]">Sales by Hour</h3>
-                <p className="text-xs text-amber-900/60 font-medium">Real-time revenue tracking for today</p>
+                <div>
+                  <h3 className="font-heading font-extrabold text-lg text-[#3C2A21]">Sales by Hour</h3>
+                  <p className="text-xs text-amber-900/60 font-medium">Real-time revenue tracking for today</p>
+                </div>
+                <div className="flex items-center gap-3">
+                  {salesByHourLoading ? (
+                    <span className="flex items-center gap-1.5 text-[10px] text-amber-900/50 font-semibold">
+                      <span className="w-3 h-3 rounded-full border-2 border-amber-900/20 border-t-amber-900 animate-spin inline-block" />
+                      Syncing...
+                    </span>
+                  ) : (
+                    <span className="text-[10px] text-amber-900/50 font-semibold">Live</span>
+                  )}
+                  <div className="flex bg-amber-900/10 p-1 rounded-xl">
+                    {['Hourly', 'Daily'].map(tf => (
+                      <button
+                        key={tf}
+                        onClick={() => setSalesTimeframe(tf)}
+                        className={`px-3 py-1 text-xs font-bold rounded-lg transition-all ${
+                          salesTimeframe === tf ? 'bg-[#3C2A21] text-amber-100 shadow' : 'text-amber-900/70'
+                        }`}
+                      >
+                        {tf}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </div>
-              <div className="flex bg-amber-900/10 p-1 rounded-xl">
-                {['Hourly', 'Daily'].map(tf => (
-                  <button
-                    key={tf}
-                    onClick={() => setSalesTimeframe(tf)}
-                    className={`px-3 py-1 text-xs font-bold rounded-lg transition-all ${
-                      salesTimeframe === tf ? 'bg-[#3C2A21] text-amber-100 shadow' : 'text-amber-900/70'
-                    }`}
-                  >
-                    {tf}
-                  </button>
-                ))}
-              </div>
-            </div>
 
             {/* Custom Bar Graph Visualization */}
             <div className="h-48 flex items-end justify-between gap-3 pt-6 pb-2 border-b border-amber-900/10">
@@ -416,7 +496,14 @@ export function Dashboard({ ingredients, products, orders, onNavigate, onOpenNew
               <span className="text-xl">🏆</span>
               <h3 className="font-heading font-extrabold text-lg text-[#3C2A21]">Best Sellers Today</h3>
             </div>
-            <span className="text-xs text-amber-900/60 font-semibold">Top Ranked</span>
+            {bestSellersLoading ? (
+              <span className="flex items-center gap-1.5 text-[10px] text-amber-900/50 font-semibold">
+                <span className="w-3 h-3 rounded-full border-2 border-amber-900/20 border-t-amber-900 animate-spin inline-block" />
+                Syncing...
+              </span>
+            ) : (
+              <span className="text-xs text-amber-900/60 font-semibold">Top Ranked</span>
+            )}
           </div>
 
           <div className="space-y-3">

@@ -23,39 +23,7 @@ export function LiveViewPage({ orders }) {
         </div>
       </div>
 
-      {/* Active Order Status */}
-      <div className="glass-card p-5 rounded-2xl border border-white/60">
-        <div className="flex items-center justify-between mb-2">
-          <span className="text-xs font-bold text-amber-900/60">Active Order Status</span>
-          <span className="text-[10px] font-bold text-amber-900/40">{activeOrders.length} active</span>
-        </div>
-        <div className="space-y-2">
-          {['New', 'Preparing', 'Ready'].map(status => {
-            const count = activeOrders.filter(o => o.status === status).length;
-            const pct = activeOrders.length > 0 ? Math.round((count / activeOrders.length) * 100) : 0;
-            if (count === 0 && activeOrders.length === 0) return null;
-            if (count === 0) return null;
-            return (
-              <div key={status}>
-                <div className="flex justify-between text-[11px] font-semibold mb-0.5">
-                  <span className={status === 'New' ? 'text-amber-700' : status === 'Preparing' ? 'text-blue-700' : 'text-emerald-700'}>{status}</span>
-                  <span className="text-amber-900/50">{count} ({pct}%)</span>
-                </div>
-                <div className="w-full h-2 rounded-full bg-amber-900/10 overflow-hidden">
-                  <div
-                    className={`h-full rounded-full animate-progress-in ${
-                      status === 'New' ? 'bg-gradient-to-r from-amber-500 to-yellow-600' :
-                      status === 'Preparing' ? 'bg-gradient-to-r from-blue-500 to-indigo-600' :
-                      'bg-gradient-to-r from-emerald-500 to-green-600'
-                    }`}
-                    style={{ width: `${pct}%` }}
-                  />
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
+
 
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
         {activeOrders.map((order) => (

@@ -1,5 +1,5 @@
 import bcrypt from 'bcryptjs';
-import { query } from '../db/index.js';
+import { query, getClient } from '../db/index.js';
 
 export const getUsers = async (req, res) => {
   try {
@@ -123,12 +123,35 @@ export const updateUser = async (req, res) => {
 
 export const deleteUser = async (req, res) => {
   const { id } = req.params;
+  const client = await getClient();
   try {
-    const result = await query('DELETE FROM users WHERE id = $1 RETURNING id', [id]);
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'User not found' });
+    // Remove FK references to the user so the DELETE succeeds even when the
+    // user has shifts, orders, stock movements, or other history records.
+    try {
+      await client.query('BEGIN');
+      await client.query('UPDATE orders SET placed_by_user_id = NULL WHERE placed_by_user_id = $1', [id]);
+      await client.query('UPDATE order_items SET prepared_by = NULL WHERE prepared_by = $1', [id]);
+      await client.query('UPDATE order_status_history SET changed_by = NULL WHERE changed_by = $1', [id]);
+      await client.query('UPDATE payments SET received_by = NULL WHERE received_by = $1', [id]);
+      await client.query('UPDATE order_discounts SET approved_by = NULL WHERE approved_by = $1', [id]);
+      await client.query('UPDATE order_item_discounts SET approved_by = NULL WHERE approved_by = $1', [id]);
+      await client.query('UPDATE stock_movements SET created_by = NULL WHERE created_by = $1', [id]);
+      await client.query('UPDATE purchase_orders SET created_by = NULL WHERE created_by = $1', [id]);
+      await client.query('UPDATE shifts SET user_id = NULL WHERE user_id = $1', [id]);
+      await client.query('UPDATE shift_reports SET user_id = NULL WHERE user_id = $1', [id]);
+
+      const result = await client.query('DELETE FROM users WHERE id = $1 RETURNING id', [id]);
+      await client.query('COMMIT');
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+      res.json({ message: 'User deleted successfully' });
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
     }
-    res.json({ message: 'User deleted successfully' });
   } catch (err) {
     console.error('deleteUser error:', err);
     res.status(500).json({ error: 'Failed to delete user' });
